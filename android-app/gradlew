@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_BASE_NAME=$(basename "$DIR")
+CLASSPATH=$DIR/gradle/wrapper/gradle-wrapper.jar
+JAVA_EXE=${JAVA_EXE:-java}
+
+if [ ! -f "$CLASSPATH" ]; then
+  echo "Gradle wrapper jar not found. Please run gradle wrapper first." >&2
+  exit 1
+fi
+
+exec "$JAVA_EXE" -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
