@@ -17,7 +17,7 @@ public class ChatHistoryStore {
             }
             builder.append(message.role)
                     .append("||")
-                    .append(message.content.replace("\n", "\\n").replace("||", "\\|\|"))
+                    .append(message.content.replace("\n", "\\n").replace("||", "\\|\\|"))
                     .append("||")
                     .append(message.timestamp);
         }
@@ -37,7 +37,7 @@ public class ChatHistoryStore {
             String[] parts = line.split("\\|\\|", 3);
             if (parts.length >= 3) {
                 String role = parts[0];
-                String content = parts[1].replace("\\n", "\n").replace("\\|\|", "||");
+                String content = parts[1].replace("\\n", "\n").replace("\\|\\|", "||");
                 long timestamp = Long.parseLong(parts[2]);
                 result.add(new ChatMessage(role, content, timestamp));
             }
