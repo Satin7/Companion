@@ -1,0 +1,14 @@
+[
+    {
+        "merged": "com.example.blankapp-merged_res-31:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "com.example.blankapp-main-32:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.example.blankapp-merged_res-31:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "com.example.blankapp-main-32:/mipmap-anydpi-v26/ic_launcher.xml"
+    },
+    {
+        "merged": "com.example.blankapp-merged_res-31:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "com.example.blankapp-main-32:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    }
+]
