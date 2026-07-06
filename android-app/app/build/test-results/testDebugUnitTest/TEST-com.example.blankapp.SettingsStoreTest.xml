@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.blankapp.SettingsStoreTest" tests="1" skipped="0" failures="1" errors="0" timestamp="2026-07-06T13:51:39" hostname="codespaces-f1e830" time="6.212">
+<testsuite name="com.example.blankapp.SettingsStoreTest" tests="1" skipped="0" failures="1" errors="0" timestamp="2026-07-06T14:07:21" hostname="codespaces-f1e830" time="5.54">
   <properties/>
-  <testcase name="storesAndReadsApiKey" classname="com.example.blankapp.SettingsStoreTest" time="6.212">
+  <testcase name="storesAndReadsApiKey" classname="com.example.blankapp.SettingsStoreTest" time="5.54">
     <failure message="java.lang.NoClassDefFoundError: android/webkit/RoboCookieManager" type="java.lang.NoClassDefFoundError">java.lang.NoClassDefFoundError: android/webkit/RoboCookieManager
 	at org.robolectric.Shadows.reset(Shadows.java:2748)
 	at org.robolectric.android.internal.AndroidTestEnvironment.resetState(AndroidTestEnvironment.java:667)

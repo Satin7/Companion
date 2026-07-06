@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.blankapp.ProactiveDialogueEngineTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-07-06T13:51:38" hostname="codespaces-f1e830" time="0.007">
+<testsuite name="com.example.blankapp.ProactiveDialogueEngineTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-07-06T14:07:26" hostname="codespaces-f1e830" time="0.008">
   <properties/>
-  <testcase name="returnsNullWhenPersonaIsBusy" classname="com.example.blankapp.ProactiveDialogueEngineTest" time="0.005"/>
+  <testcase name="returnsNullWhenPersonaIsBusy" classname="com.example.blankapp.ProactiveDialogueEngineTest" time="0.007"/>
   <testcase name="returnsMessageWhenPersonaIsHealthyAndContextIsRich" classname="com.example.blankapp.ProactiveDialogueEngineTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
