@@ -16,11 +16,12 @@ public class ChatDetailActivity extends AppCompatActivity {
     private final PersonaState personaState = new PersonaState();
     private final ProactiveDialogueEngine proactiveEngine = new ProactiveDialogueEngine();
     private final DeepSeekClient deepSeekClient = new DeepSeekClient();
-    private final SettingsStore settingsStore = new SettingsStore(this);
+    private SettingsStore settingsStore;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        settingsStore = new SettingsStore(this);
         setContentView(R.layout.activity_chat_detail);
 
         String contactName = getIntent().getStringExtra("contact_name");
