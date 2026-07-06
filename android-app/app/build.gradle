@@ -7,7 +7,7 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.example.blankapp"
+        applicationId "com.companion.mobile"
         minSdk 24
         targetSdk 34
         versionCode 1

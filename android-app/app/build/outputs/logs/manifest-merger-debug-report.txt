@@ -79,7 +79,7 @@ MERGED from [androidx.startup:startup-runtime:1.1.1] /home/codespace/.gradle/cac
 	android:supportsRtl
 		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:8:9-35
 	android:label
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:6:9-34
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:6:9-41
 	android:roundIcon
 		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:7:9-54
 	android:icon
@@ -236,7 +236,7 @@ ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:24:9-44
 	android:name
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:23:9-81
-permission#com.example.blankapp.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+permission#com.companion.mobile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
 ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:22:5-24:47
 	android:protectionLevel
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:24:9-44
@@ -246,7 +246,7 @@ uses-permission#${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
 ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:26:5-97
 	android:name
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:26:22-94
-uses-permission#com.example.blankapp.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+uses-permission#com.companion.mobile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
 ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:26:5-97
 	android:name
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:26:22-94
