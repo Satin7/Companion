@@ -1,14 +1,30 @@
 [
     {
-        "merged": "com.example.blankapp-merged_res-31:/drawable_ic_launcher_foreground.xml.flat",
-        "source": "com.example.blankapp-main-32:/drawable/ic_launcher_foreground.xml"
+        "merged": "/home/codespace/.gradle/daemon/8.6/com.example.blankapp-merged_res-31:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "/home/codespace/.gradle/daemon/8.6/com.example.blankapp-main-32:/drawable/ic_launcher_foreground.xml"
     },
     {
-        "merged": "com.example.blankapp-merged_res-31:/mipmap-anydpi-v26_ic_launcher.xml.flat",
-        "source": "com.example.blankapp-main-32:/mipmap-anydpi-v26/ic_launcher.xml"
+        "merged": "com.example.blankapp-merged_res-31:/layout_activity_chat_list.xml.flat",
+        "source": "com.example.blankapp-main-32:/layout/activity_chat_list.xml"
     },
     {
-        "merged": "com.example.blankapp-merged_res-31:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
-        "source": "com.example.blankapp-main-32:/mipmap-anydpi-v26/ic_launcher_round.xml"
+        "merged": "com.example.blankapp-merged_res-31:/layout_activity_chat_detail.xml.flat",
+        "source": "com.example.blankapp-main-32:/layout/activity_chat_detail.xml"
+    },
+    {
+        "merged": "/home/codespace/.gradle/daemon/8.6/com.example.blankapp-merged_res-31:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "/home/codespace/.gradle/daemon/8.6/com.example.blankapp-main-32:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    },
+    {
+        "merged": "com.example.blankapp-merged_res-31:/layout_activity_settings.xml.flat",
+        "source": "com.example.blankapp-main-32:/layout/activity_settings.xml"
+    },
+    {
+        "merged": "com.example.blankapp-merged_res-31:/layout_item_chat_contact.xml.flat",
+        "source": "com.example.blankapp-main-32:/layout/item_chat_contact.xml"
+    },
+    {
+        "merged": "/home/codespace/.gradle/daemon/8.6/com.example.blankapp-merged_res-31:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "/home/codespace/.gradle/daemon/8.6/com.example.blankapp-main-32:/mipmap-anydpi-v26/ic_launcher.xml"
     }
 ]

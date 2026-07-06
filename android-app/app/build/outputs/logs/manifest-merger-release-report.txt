@@ -1,9 +1,9 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-19:12
-INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-19:12
-INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-19:12
-INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-19:12
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-21:12
+INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-21:12
+INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-21:12
+INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-21:12
 MERGED from [com.google.android.material:material:1.12.0] /home/codespace/.gradle/caches/transforms-4/0aa46b363ddee8066970ece9e8928675/transformed/material-1.12.0/AndroidManifest.xml:17:1-24:12
 MERGED from [androidx.appcompat:appcompat-resources:1.6.1] /home/codespace/.gradle/caches/transforms-4/90a7d19a1d073d5297ce6140dc8713d1/transformed/appcompat-resources-1.6.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/codespace/.gradle/caches/transforms-4/e72504c335aa791245b5b1bd44228a91/transformed/constraintlayout-2.0.1/AndroidManifest.xml:2:1-11:12
@@ -54,8 +54,8 @@ MERGED from [androidx.annotation:annotation-experimental:1.4.0] /home/codespace/
 	xmlns:android
 		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:11-69
 application
-ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:3:5-18:19
-INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:3:5-18:19
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:3:5-20:19
+INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:3:5-20:19
 MERGED from [com.google.android.material:material:1.12.0] /home/codespace/.gradle/caches/transforms-4/0aa46b363ddee8066970ece9e8928675/transformed/material-1.12.0/AndroidManifest.xml:22:5-20
 MERGED from [com.google.android.material:material:1.12.0] /home/codespace/.gradle/caches/transforms-4/0aa46b363ddee8066970ece9e8928675/transformed/material-1.12.0/AndroidManifest.xml:22:5-20
 MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/codespace/.gradle/caches/transforms-4/e72504c335aa791245b5b1bd44228a91/transformed/constraintlayout-2.0.1/AndroidManifest.xml:9:5-20
@@ -79,7 +79,7 @@ MERGED from [androidx.startup:startup-runtime:1.1.1] /home/codespace/.gradle/cac
 	android:supportsRtl
 		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:8:9-35
 	android:label
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:6:9-44
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:6:9-34
 	android:roundIcon
 		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:7:9-54
 	android:icon
@@ -88,12 +88,12 @@ MERGED from [androidx.startup:startup-runtime:1.1.1] /home/codespace/.gradle/cac
 		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:4:9-35
 	android:theme
 		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:9:9-40
-activity#com.example.blankapp.MainActivity
+activity#com.example.blankapp.ChatListActivity
 ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:10:9-17:20
 	android:exported
 		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:12:13-36
 	android:name
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:11:13-41
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:11:13-45
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
 ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:13:13-16:29
 action#android.intent.action.MAIN
@@ -104,6 +104,14 @@ category#android.intent.category.LAUNCHER
 ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:15:17-77
 	android:name
 		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:15:27-74
+activity#com.example.blankapp.SettingsActivity
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:18:9-54
+	android:name
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:18:19-51
+activity#com.example.blankapp.ChatDetailActivity
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:19:9-56
+	android:name
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:19:19-53
 uses-sdk
 INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml

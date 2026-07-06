@@ -2,6 +2,22 @@ R_DEF: Internal format may change without notice
 local
 color ic_launcher_background
 drawable ic_launcher_foreground
+id btnSaveSettings
+id btnSend
+id btnSettings
+id chatTitle
+id contactAvatar
+id contactName
+id contactPreview
+id inputApiKey
+id inputMessage
+id inputServerUrl
+id messageContainer
+id recyclerContacts
+layout activity_chat_detail
+layout activity_chat_list
+layout activity_settings
+layout item_chat_contact
 mipmap ic_launcher
 mipmap ic_launcher_round
 style AppTheme
