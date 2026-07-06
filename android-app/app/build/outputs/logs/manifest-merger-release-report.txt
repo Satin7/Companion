@@ -1,9 +1,9 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-21:12
-INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-21:12
-INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-21:12
-INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-21:12
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-23:12
+INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-23:12
+INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-23:12
+INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:1-23:12
 MERGED from [com.google.android.material:material:1.12.0] /home/codespace/.gradle/caches/transforms-4/0aa46b363ddee8066970ece9e8928675/transformed/material-1.12.0/AndroidManifest.xml:17:1-24:12
 MERGED from [androidx.appcompat:appcompat-resources:1.6.1] /home/codespace/.gradle/caches/transforms-4/90a7d19a1d073d5297ce6140dc8713d1/transformed/appcompat-resources-1.6.1/AndroidManifest.xml:17:1-22:12
 MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/codespace/.gradle/caches/transforms-4/e72504c335aa791245b5b1bd44228a91/transformed/constraintlayout-2.0.1/AndroidManifest.xml:2:1-11:12
@@ -53,9 +53,13 @@ MERGED from [androidx.annotation:annotation-experimental:1.4.0] /home/codespace/
 		INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml
 	xmlns:android
 		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:2:11-69
+uses-permission#android.permission.INTERNET
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:3:5-67
+	android:name
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:3:22-64
 application
-ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:3:5-20:19
-INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:3:5-20:19
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:5:5-22:19
+INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:5:5-22:19
 MERGED from [com.google.android.material:material:1.12.0] /home/codespace/.gradle/caches/transforms-4/0aa46b363ddee8066970ece9e8928675/transformed/material-1.12.0/AndroidManifest.xml:22:5-20
 MERGED from [com.google.android.material:material:1.12.0] /home/codespace/.gradle/caches/transforms-4/0aa46b363ddee8066970ece9e8928675/transformed/material-1.12.0/AndroidManifest.xml:22:5-20
 MERGED from [androidx.constraintlayout:constraintlayout:2.0.1] /home/codespace/.gradle/caches/transforms-4/e72504c335aa791245b5b1bd44228a91/transformed/constraintlayout-2.0.1/AndroidManifest.xml:9:5-20
@@ -77,41 +81,41 @@ MERGED from [androidx.startup:startup-runtime:1.1.1] /home/codespace/.gradle/cac
 	android:appComponentFactory
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:28:18-86
 	android:supportsRtl
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:8:9-35
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:10:9-35
 	android:label
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:6:9-34
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:8:9-41
 	android:roundIcon
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:7:9-54
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:9:9-54
 	android:icon
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:5:9-43
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:7:9-43
 	android:allowBackup
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:4:9-35
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:6:9-35
 	android:theme
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:9:9-40
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:11:9-40
 activity#com.example.blankapp.ChatListActivity
-ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:10:9-17:20
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:12:9-19:20
 	android:exported
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:12:13-36
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:14:13-36
 	android:name
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:11:13-45
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:13:13-45
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
-ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:13:13-16:29
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:15:13-18:29
 action#android.intent.action.MAIN
-ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:14:17-69
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:16:17-69
 	android:name
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:14:25-66
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:16:25-66
 category#android.intent.category.LAUNCHER
-ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:15:17-77
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:17:17-77
 	android:name
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:15:27-74
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:17:27-74
 activity#com.example.blankapp.SettingsActivity
-ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:18:9-54
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:20:9-54
 	android:name
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:18:19-51
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:20:19-51
 activity#com.example.blankapp.ChatDetailActivity
-ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:19:9-56
+ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:21:9-56
 	android:name
-		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:19:19-53
+		ADDED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml:21:19-53
 uses-sdk
 INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /workspaces/Companion/android-app/app/src/main/AndroidManifest.xml
@@ -236,7 +240,7 @@ ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:24:9-44
 	android:name
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:23:9-81
-permission#com.example.blankapp.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+permission#com.companion.mobile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
 ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:22:5-24:47
 	android:protectionLevel
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:24:9-44
@@ -246,7 +250,7 @@ uses-permission#${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
 ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:26:5-97
 	android:name
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:26:22-94
-uses-permission#com.example.blankapp.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+uses-permission#com.companion.mobile.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
 ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:26:5-97
 	android:name
 		ADDED from [androidx.core:core:1.13.0] /home/codespace/.gradle/caches/transforms-4/6058577154f3ae980d6632fedd1ac9da/transformed/core-1.13.0/AndroidManifest.xml:26:22-94
