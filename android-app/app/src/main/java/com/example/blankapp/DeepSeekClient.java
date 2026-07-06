@@ -22,7 +22,7 @@ public class DeepSeekClient {
     public void complete(String apiKey, String prompt, Callback callback) {
         executor.execute(() -> {
             try {
-                URL url = new URL("https://api.deepseek.com/v1/chat/completions");
+                URL url = new URL("https://api.deepseek.com/chat/completions");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
@@ -30,12 +30,18 @@ public class DeepSeekClient {
                 conn.setDoOutput(true);
 
                 JSONObject body = new JSONObject();
-                body.put("model", "deepseek-chat");
+                body.put("model", "deepseek-v4-pro");
+
+                org.json.JSONArray messages = new org.json.JSONArray();
+                messages.put(new JSONObject().put("role", "system").put("content", "You are a helpful assistant."));
+                messages.put(new JSONObject().put("role", "user").put("content", prompt));
+                body.put("messages", messages);
+
+                JSONObject thinking = new JSONObject();
+                thinking.put("type", "enabled");
+                body.put("thinking", thinking);
+                body.put("reasoning_effort", "high");
                 body.put("stream", false);
-                JSONObject message = new JSONObject();
-                message.put("role", "user");
-                message.put("content", prompt);
-                body.put("messages", new org.json.JSONArray().put(message));
 
                 byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
                 conn.setFixedLengthStreamingMode(payload.length);
