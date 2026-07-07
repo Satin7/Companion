@@ -2,6 +2,12 @@ package com.example.blankapp;
 
 import java.util.List;
 
+/**
+ * @deprecated Replaced by {@link com.example.blankapp.orchestration.ProactiveOrchestrator}
+ *             which uses LLM-driven decision, LifeEngine + EmotionEngine, and dynamic PersonaState.
+ *             Kept for reference only; will be removed in a future cleanup.
+ */
+@Deprecated
 public class ProactiveDialogueEngine {
     public String evaluateForProactiveMessage(String latestUserInput, PersonaState personaState, List<ChatMessage> history) {
         if (personaState == null) {

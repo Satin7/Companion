@@ -27,6 +27,7 @@ public class ChatListActivity extends AppCompatActivity {
         contacts.add(new ChatContact("companion", "Companion", "你今天想聊什么？", Color.parseColor("#4F46E5")));
         contacts.add(new ChatContact("study", "学习助手", "帮我整理今天的学习计划", Color.parseColor("#0F766E")));
         contacts.add(new ChatContact("life", "生活管家", "提醒我下午去取快递", Color.parseColor("#DC2626")));
+        contacts.add(new ChatContact("test_proactive", "🧪 主动消息测试", "每1分钟自动发送主动消息", Color.parseColor("#F59E0B")));
 
         RecyclerView recyclerView = findViewById(R.id.recyclerContacts);
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
