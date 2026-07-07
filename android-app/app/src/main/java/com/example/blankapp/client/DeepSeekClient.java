@@ -89,13 +89,32 @@ public class DeepSeekClient {
             throw new RuntimeException("HTTP " + code + ": " + error);
         }
 
-        return readStream(conn.getInputStream());
+        String raw = readStream(conn.getInputStream());
+        return parseContent(raw);
     }
 
     private String readStream(java.io.InputStream stream) {
         if (stream == null) return "";
         java.util.Scanner s = new java.util.Scanner(stream, StandardCharsets.UTF_8.name()).useDelimiter("\\A");
         return s.hasNext() ? s.next() : "";
+    }
+
+    /**
+     * Extract choices[0].message.content from the DeepSeek API response JSON.
+     * Only returns the final reply text; reasoning_content, id, system_fingerprint
+     * etc. are discarded.
+     */
+    static String parseContent(String raw) {
+        try {
+            JSONObject root = new JSONObject(raw);
+            return root.getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content");
+        } catch (Exception e) {
+            // If parsing fails, return raw so the caller can see what went wrong
+            return raw;
+        }
     }
 
     private boolean isRetryable(Exception e) {
