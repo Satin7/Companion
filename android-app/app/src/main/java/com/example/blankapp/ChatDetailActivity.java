@@ -49,6 +49,9 @@ public class ChatDetailActivity extends AppCompatActivity {
             orchestrator.enableTestMode();
         }
 
+        // Start the timer-based trigger scheduler
+        orchestrator.start();
+
         // Load messages
         LinearLayout messageContainer = findViewById(R.id.messageContainer);
         if (messages.isEmpty()) {
