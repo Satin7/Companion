@@ -74,7 +74,9 @@ public class LifeEngine {
 
         if (state == State.OBSERVING || state == State.IDLE) {
             boolean idleTooLong = idleMs > idleThresholdMs;
-            boolean inActiveWindow = activeHours.contains(hourOfDay(now));
+            // If no active hours recorded yet (fresh contact), treat current hour as active
+            boolean inActiveWindow = activeHours.isEmpty()
+                    || activeHours.contains(hourOfDay(now));
             boolean engagementDropped = interactionCountToday < historicalDailyAvg * ENGAGEMENT_DROP_RATIO;
             boolean morningNoChat = hourOfDay(now) >= 10 && interactionCountToday == 0;
 

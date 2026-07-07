@@ -44,6 +44,16 @@ public class ProactiveOrchestrator {
     private Callback defaultCallback;
     private List<ChatMessage> cachedMessages; // reference to ChatDetailActivity's list
 
+    // ── cached messages setter ──────────────────────────────────
+
+    /**
+     * Set the cached message list reference so the timer tick has context to
+     * evaluate triggers. Call this after loading messages in onCreate/onResume.
+     */
+    public void setCachedMessages(List<ChatMessage> messages) {
+        this.cachedMessages = messages;
+    }
+
     // ── callback ────────────────────────────────────────────────
 
     public interface Callback {
@@ -70,6 +80,7 @@ public class ProactiveOrchestrator {
         // Load persisted state
         this.lifeEngine.load(contactId);
         this.emotionEngine.load(contactId);
+        this.personaManager.load(contactId);
 
         // Scheduler that calls onTimerTick
         this.scheduler = new TriggerScheduler(this::onTimerTick);

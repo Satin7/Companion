@@ -64,6 +64,10 @@ public class ChatDetailActivity extends AppCompatActivity {
             }
         }
         renderMessages(messageContainer);
+
+        // Feed loaded messages into the orchestrator so timer ticks have context
+        orchestrator.setCachedMessages(messages);
+
         ScrollView scrollView = findViewById(R.id.chatScrollView);
         scrollView.post(() -> scrollView.fullScroll(ScrollView.FOCUS_DOWN));
 
