@@ -2,6 +2,7 @@ package com.example.blankapp.engine;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -19,11 +20,14 @@ import java.util.Set;
  */
 public class LifeEngine {
 
+    private static final String TAG = "LifeEngine";
     private static final String PREFS_NAME = "life_engine_state";
 
     // ── configurable thresholds ─────────────────────────────────
 
     private static final float ENGAGEMENT_DROP_RATIO = 0.3f; // 30% of average
+    private static final int MIN_INTERACTIONS_FOR_ENGAGEMENT_DROP = 5;
+    private static final long MIN_REPEAT_SIGNAL_INTERVAL_MS = 30 * 60 * 1000L; // 30 min cooldown
 
     // ── state ───────────────────────────────────────────────────
 
@@ -33,14 +37,18 @@ public class LifeEngine {
     private long lastInteractionTimestamp;
     private int interactionCountToday;
     private final Set<Integer> activeHours = new HashSet<>(); // hours of day (0-23) user is active
-    private int historicalDailyAvg = 10; // rolling estimate
+    private int historicalDailyAvg = 10; // rolling estimate, seeded at 10
     private long idleThresholdMs = 2 * 60 * 60 * 1000L; // default 2 hours
+    private long lastSignalTimestamp = 0; // prevent re-firing the same signal
+    private LifeEngineEvent.Reason lastSignalReason = null;
+    private boolean hasAnyInteraction = false; // true once user sends at least one message
 
     private final SharedPreferences prefs;
 
     public LifeEngine(Context context) {
-        this.prefs = context.getApplicationContext()
-                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        this.prefs = context != null
+                ? context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                : null;
     }
 
     /** Override the idle threshold. Use e.g. 60_000 for 1-minute test mode. */
@@ -54,6 +62,7 @@ public class LifeEngine {
     public void onUserMessage(long timestamp) {
         lastInteractionTimestamp = timestamp;
         interactionCountToday++;
+        hasAnyInteraction = true;
 
         int hour = hourOfDay(timestamp);
         activeHours.add(hour);
@@ -74,17 +83,31 @@ public class LifeEngine {
 
         if (state == State.OBSERVING || state == State.IDLE) {
             boolean idleTooLong = idleMs > idleThresholdMs;
-            // If no active hours recorded yet (fresh contact), treat current hour as active
+            // If no active hours recorded yet (fresh contact), treat all hours as active
             boolean inActiveWindow = activeHours.isEmpty()
                     || activeHours.contains(hourOfDay(now));
-            boolean engagementDropped = interactionCountToday < historicalDailyAvg * ENGAGEMENT_DROP_RATIO;
+            // Engagement drop: only fire if user has enough history to make it meaningful
+            boolean engagementDropped = interactionCountToday >= MIN_INTERACTIONS_FOR_ENGAGEMENT_DROP
+                    && interactionCountToday < historicalDailyAvg * ENGAGEMENT_DROP_RATIO;
             boolean morningNoChat = hourOfDay(now) >= 10 && interactionCountToday == 0;
+            // Fresh contact with no interaction history at all — prime time for greeting
+            boolean freshContact = interactionCountToday == 0
+                    && !hasAnyInteraction
+                    && activeHours.isEmpty();
 
-            if (idleTooLong && inActiveWindow) {
+            if (morningNoChat) {
+                Log.i(TAG, "onTimerTick: MORNING_CHECK_IN triggered, state=READY");
                 state = State.READY;
-            } else if (engagementDropped && interactionCountToday > 0) {
+            } else if (freshContact) {
+                Log.i(TAG, "onTimerTick: FRESH_CONTACT triggered, state=READY");
                 state = State.READY;
-            } else if (morningNoChat) {
+            } else if (engagementDropped) {
+                Log.i(TAG, "onTimerTick: ENGAGEMENT_DROP triggered (today="
+                        + interactionCountToday + " vs avg=" + historicalDailyAvg + "), state=READY");
+                state = State.READY;
+            } else if (idleTooLong && inActiveWindow) {
+                Log.i(TAG, "onTimerTick: PROLONGED_IDLE triggered (idleMs=" + idleMs
+                        + " > threshold=" + idleThresholdMs + "), state=READY");
                 state = State.READY;
             }
         }
@@ -101,10 +124,19 @@ public class LifeEngine {
         LifeEngineEvent.Reason reason;
         String hint;
 
-        if (interactionCountToday == 0 && hourOfDay(now) >= 10) {
+        // Determine the strongest signal
+        boolean freshContact = interactionCountToday == 0
+                && !hasAnyInteraction
+                && activeHours.isEmpty();
+
+        if (freshContact) {
+            reason = LifeEngineEvent.Reason.INITIAL_GREETING;
+            hint = "用户还未进行过任何对话，是发起首次主动问候的好时机";
+        } else if (interactionCountToday == 0 && hourOfDay(now) >= 10) {
             reason = LifeEngineEvent.Reason.MORNING_CHECK_IN;
             hint = "用户今天还没有开始聊天，可以问候早安";
-        } else if (interactionCountToday > 0
+        } else if (interactionCountToday >= MIN_INTERACTIONS_FOR_ENGAGEMENT_DROP
+                && historicalDailyAvg > 0
                 && interactionCountToday < historicalDailyAvg * ENGAGEMENT_DROP_RATIO) {
             reason = LifeEngineEvent.Reason.ENGAGEMENT_DROP;
             hint = "用户今天的互动明显少于平常，可能心情不好或很忙";
@@ -113,11 +145,24 @@ public class LifeEngine {
             hint = "用户已经 " + idleMinutes + " 分钟没有互动了，通常在此时段活跃";
         }
 
+        // ── cooldown: don't re-fire the same reason too quickly ──
+        if (reason == lastSignalReason
+                && (now - lastSignalTimestamp) < MIN_REPEAT_SIGNAL_INTERVAL_MS) {
+            Log.d(TAG, "checkForLifeSignal: cooldown active for reason=" + reason
+                    + ", remaining=" + (MIN_REPEAT_SIGNAL_INTERVAL_MS - (now - lastSignalTimestamp)) / 60_000L + "min");
+            state = State.OBSERVING; // stay quiet, try again later
+            return null;
+        }
+
         float confidence = Math.min(0.95f, idleMinutes / 480f); // scales to 0.95 over 8h
 
         // Transition back after firing
         state = State.OBSERVING;
+        lastSignalTimestamp = now;
+        lastSignalReason = reason;
 
+        Log.i(TAG, "checkForLifeSignal: FIRING reason=" + reason
+                + ", confidence=" + confidence + ", idleMinutes=" + idleMinutes);
         return new LifeEngineEvent(reason, confidence, hint, idleMinutes);
     }
 
@@ -130,14 +175,19 @@ public class LifeEngine {
             obj.put("lastInteraction", lastInteractionTimestamp);
             obj.put("interactionCountToday", interactionCountToday);
             obj.put("historicalDailyAvg", historicalDailyAvg);
+            obj.put("lastSignalTimestamp", lastSignalTimestamp);
+            obj.put("lastSignalReason", lastSignalReason != null ? lastSignalReason.name() : null);
+            obj.put("hasAnyInteraction", hasAnyInteraction);
             JSONArray hours = new JSONArray();
             for (int h : activeHours) hours.put(h);
             obj.put("activeHours", hours);
         } catch (Exception ignored) {}
+        if (prefs == null) return;
         prefs.edit().putString(contactId, obj.toString()).apply();
     }
 
     public void load(String contactId) {
+        if (prefs == null) return;
         String raw = prefs.getString(contactId, null);
         if (raw == null || raw.isEmpty()) {
             lastInteractionTimestamp = System.currentTimeMillis();
@@ -149,6 +199,11 @@ public class LifeEngine {
             lastInteractionTimestamp = obj.optLong("lastInteraction", System.currentTimeMillis());
             interactionCountToday = obj.optInt("interactionCountToday", 0);
             historicalDailyAvg = obj.optInt("historicalDailyAvg", 10);
+            lastSignalTimestamp = obj.optLong("lastSignalTimestamp", 0);
+            String reasonStr = obj.optString("lastSignalReason", null);
+            lastSignalReason = (reasonStr != null && !reasonStr.equals("null"))
+                    ? LifeEngineEvent.Reason.valueOf(reasonStr) : null;
+            hasAnyInteraction = obj.optBoolean("hasAnyInteraction", false);
             activeHours.clear();
             JSONArray hours = obj.optJSONArray("activeHours");
             if (hours != null) {

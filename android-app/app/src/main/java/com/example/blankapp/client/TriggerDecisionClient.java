@@ -136,8 +136,10 @@ public class TriggerDecisionClient {
                 + "decide whether to proactively initiate a check-in with the user.\n\n"
                 + "Guidelines:\n"
                 + "- ONLY speak if there is a clear reason (emotional signal OR life pattern signal)\n"
+                + "- INITIAL_GREETING (fresh contact) and MORNING_CHECK_IN are ALWAYS strong signals — speak warmly\n"
+                + "- Emotional distress (SUSTAINED_DISTRESS, NEGATIVE_SHIFT, HIGH_AROUSAL) is a strong signal — speak with care\n"
+                + "- ENGAGEMENT_DROP and PROLONGED_IDLE: speak if the context supports it\n"
                 + "- If the user is actively chatting, prefer NOT to interrupt\n"
-                + "- Morning check-ins and emotional distress are strong signals to speak\n"
                 + "- Respond ONLY with a JSON object (no markdown, no explanation):\n"
                 + "  {\"shouldSpeak\": bool, \"topicHint\": \"short Chinese topic\", \"confidence\": 0.0-1.0}\n"
                 + "topicHint should be a short Chinese phrase suggesting what to talk about. If shouldSpeak is false, topicHint must be null.";

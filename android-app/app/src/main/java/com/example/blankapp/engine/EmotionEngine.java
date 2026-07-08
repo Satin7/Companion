@@ -43,8 +43,9 @@ public class EmotionEngine {
     private DeepSeekClient llmClient; // injected, not owned
 
     public EmotionEngine(Context context) {
-        this.prefs = context.getApplicationContext()
-                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        this.prefs = context != null
+                ? context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                : null;
     }
 
     /** Inject the LLM client after construction. */

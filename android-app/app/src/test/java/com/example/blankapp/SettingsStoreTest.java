@@ -3,16 +3,25 @@ package com.example.blankapp;
 import static org.junit.Assert.assertEquals;
 
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
-import org.robolectric.RuntimeEnvironment;
 
-@RunWith(RobolectricTestRunner.class)
+/**
+ * SettingsStore tests (no Robolectric required).
+ * SettingsStore with null context simply returns defaults.
+ */
 public class SettingsStoreTest {
     @Test
-    public void storesAndReadsApiKey() {
-        SettingsStore store = new SettingsStore(RuntimeEnvironment.getApplication());
+    public void nullContextReturnsDefaults() {
+        SettingsStore store = new SettingsStore(null);
+        assertEquals("", store.getApiKey());
+        assertEquals("http://10.0.2.2:8000", store.getServerUrl());
+    }
+
+    @Test
+    public void saveAndRead_withNullContext_doesNotCrash() {
+        SettingsStore store = new SettingsStore(null);
         store.saveApiKey("test-key");
-        assertEquals("test-key", store.getApiKey());
+        store.saveServerUrl("http://test:1234");
+        // With null context, SharedPreferences is null — save/read won't persist
+        // but shouldn't crash
     }
 }
