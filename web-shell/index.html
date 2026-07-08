@@ -57,6 +57,12 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
       <option value="default">Companion</option>
       <option value="test">🧪 主动消息测试 (1分钟)</option>
     </select>
+    <span style="font-size:12px;margin-left:8px">模式:</span>
+    <select id="mode-toggle" onchange="onModeToggle()">
+      <option value="auto">自动</option>
+      <option value="PRESENT">PRESENT (强互动)</option>
+      <option value="ABSENT">ABSENT (弱互动)</option>
+    </select>
   </div>
   <div id="api-key-area">
     <span>🔑 DeepSeek API Key:</span>
@@ -462,24 +468,28 @@ const DecisionClient = {
     const desireLevel = EmotionState.desireLevel;
     const desireThreshold = 0.5;
 
-    // PRESENT mode: user is here, no proactive needed (just reply normally)
-    if (interactionMode === 'PRESENT' && desireLevel < desireThreshold) {
-      if (!lifeEvent) return TriggerDecision.noAction();
+    // PRESENT mode: user is here chatting. Default: SILENT.
+    // Only speak if desire is very high (user silent within PRESENT) or emotional urgency.
+    if (interactionMode === 'PRESENT') {
+      if (desireLevel < 0.4) return TriggerDecision.noAction(); // firmly silent
+      if (desireLevel < desireThreshold && !emotionEvent) return TriggerDecision.noAction();
+      // desire > 0.5 or emotional signal: may gently follow up
+      if (!lifeEvent && !emotionEvent) return TriggerDecision.noAction();
     }
 
     // ABSENT mode: decide which strategy
-    let strategy = 'reduce_frequency'; // default: 减频等待
+    let strategy = 'reduce_frequency';
     if (interactionMode === 'ABSENT') {
       const noReply = LifeEngine.consecutiveNoReply;
       const emotionUrgency = emotionEvent ? emotionEvent.urgency : 0;
       const userNeedCare = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.needCare : 0;
 
       if (emotionUrgency > 0.5 || userNeedCare > 0.5) {
-        strategy = 'check_in';        // 追问关心
+        strategy = 'check_in';
       } else if (noReply > 3 && desireLevel > 0.7) {
-        strategy = 'keep_company';    // 持续陪伴
+        strategy = 'keep_company';
       } else if (noReply > 2) {
-        strategy = 'reduce_frequency'; // 减频等待
+        strategy = 'reduce_frequency';
       }
     }
 
@@ -539,27 +549,118 @@ Respond ONLY with JSON: {"shouldSpeak":bool,"topicHint":"short Chinese topic or 
 // ═══════════════════════════════════════════════════════════════
 // ORCHESTRATOR
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// ATTENTION SCHEDULER — replaces fixed-interval polling
+// ═══════════════════════════════════════════════════════════════
+const SHORT_WAVE_MS = 25 * 60 * 1000;   // 25 min
+const LONG_WAVE_MS  = 90 * 60 * 1000;   // 90 min
+const MIN_CHECK_MS  = 15 * 1000;         // min 15s between checks
+const MAX_CHECK_MS  = 20 * 60 * 1000;    // max 20min between checks
+const T50_MS        = 2 * 60 * 60 * 1000; // idle time for P=0.5
+
 let schedulerId = null;
-let schedulerInterval = 30_000; // 30s in test mode, 120s normal
+let testMode = false;
+
+/** Attention probability: how likely Companion is "thinking of" the user right now. */
+function attentionProbability(idleMs, mode, emotionUrgency) {
+  if (idleMs <= 0) return 0.01;
+
+  // Sigmoid base: rises with idle time
+  const sigmoid = 1.0 / (1.0 + Math.exp(-(idleMs - T50_MS) / (T50_MS / 4)));
+
+  // Dual-wave fluctuation
+  const shortWave = Math.sin(2 * Math.PI * idleMs / SHORT_WAVE_MS) * 0.08;
+  const longWave  = Math.sin(2 * Math.PI * idleMs / LONG_WAVE_MS) * 0.12;
+
+  // Mode modulation: PRESENT heavily suppresses attention (user is right there)
+  const modeFactor = mode === 'PRESENT' ? 0.15 : 1.0;
+
+  // Emotional urgency boosts attention
+  const emotionBoost = 1.0 + (emotionUrgency || 0) * 0.5;
+
+  let p = (sigmoid + shortWave + longWave) * modeFactor * emotionBoost;
+  // Add small random noise (±5%)
+  p += (Math.random() - 0.5) * 0.1;
+  return Math.max(0.01, Math.min(0.95, p));
+}
+
+/** Compute how long to wait before next check, based on current attention. */
+function computeNextDelay(idleMs, mode, emotionUrgency) {
+  const p = attentionProbability(idleMs, mode, emotionUrgency);
+  // High attention → short delay; low attention → long delay
+  // Map P from [0.01, 0.95] to [MAX_CHECK, MIN_CHECK]
+  const logP = Math.log(p + 0.001);
+  const logMin = Math.log(0.01);
+  const logMax = Math.log(0.95);
+  const frac = (logP - logMin) / (logMax - logMin); // 0→low, 1→high
+  const delay = MAX_CHECK_MS - frac * (MAX_CHECK_MS - MIN_CHECK_MS);
+
+  // In test mode, compress to 10s-2min range
+  if (testMode) {
+    return Math.max(10_000, Math.min(120_000, delay / 10));
+  }
+  return Math.max(MIN_CHECK_MS, Math.min(MAX_CHECK_MS, delay));
+}
+
+function scheduleNextCheck() {
+  if (!schedulerId) return;
+  const now = Date.now();
+  const idleMs = now - LifeEngine.lastInteraction;
+  const mode = LifeEngine.interactionMode;
+  const urgency = EmotionEngine.checkForEmotionalSignal()?.urgency || 0;
+  const delay = computeNextDelay(idleMs, mode, urgency);
+  const p = attentionProbability(idleMs, mode, urgency);
+  log('info', `⏱ Next check in ${(delay/1000).toFixed(0)}s (P=${p.toFixed(3)} mode=${mode} idle=${(idleMs/60000).toFixed(1)}min)`);
+  schedulerId = setTimeout(onAttentionTick, delay);
+}
 
 function startScheduler() {
   if (schedulerId) return;
-  log('info', `⏰ Scheduler started (interval=${schedulerInterval/1000}s)`);
-  schedulerId = setInterval(onTimerTick, schedulerInterval);
+  log('info', '🧠 AttentionScheduler started');
+  scheduleNextCheck();
 }
 
 function stopScheduler() {
   if (!schedulerId) return;
-  clearInterval(schedulerId);
+  clearTimeout(schedulerId);
   schedulerId = null;
 }
 
-function enableTestMode() {
-  LifeEngine.idleThresholdMs = 60_000; // 1min
-  schedulerInterval = 30_000;          // 30s
-  if (schedulerId) { stopScheduler(); startScheduler(); }
-  log('event', '🧪 TEST MODE: idleThreshold=1min, tick=30s');
+async function onAttentionTick() {
+  schedulerId = null; // clear so we can re-schedule
+  await onTimerTick();
+  if (schedulerId === null) scheduleNextCheck(); // only if not stopped
 }
+
+function enableTestMode() {
+  LifeEngine.idleThresholdMs = 60_000;
+  testMode = true;
+  if (schedulerId) { stopScheduler(); startScheduler(); }
+  log('event', '🧪 TEST MODE: idleThreshold=1min, attention intervals compressed');
+}
+
+let manualMode = 'auto'; // 'auto' | 'PRESENT' | 'ABSENT'
+function onModeToggle() {
+  manualMode = document.getElementById('mode-toggle').value;
+  if (manualMode === 'PRESENT') {
+    LifeEngine.interactionMode = 'PRESENT';
+    log('event', '📡 手动切换 → PRESENT (强互动)');
+  } else if (manualMode === 'ABSENT') {
+    LifeEngine.interactionMode = 'ABSENT';
+    log('event', '📡 手动切换 → ABSENT (弱互动)');
+  } else {
+    // auto: restore from engine's natural evaluation
+    LifeEngine.evaluateInteractionMode(Date.now());
+    log('event', '📡 切换回自动模式');
+  }
+}
+
+// Override evaluateInteractionMode to respect manual toggle
+const _origEvaluateInteractionMode = LifeEngine.evaluateInteractionMode;
+LifeEngine.evaluateInteractionMode = function(now) {
+  if (manualMode !== 'auto') return; // manual override
+  _origEvaluateInteractionMode.call(this, now);
+};
 
 async function evaluatePostReply(userText, messages) {
   LifeEngine.onUserMessage(Date.now(), userText);
@@ -773,8 +874,10 @@ function updateDebug() {
     + `基础速率=<span class="dim">${d.rate}</span> `
     + `情感乘数=<span class="${d.multiplier>1.3?'warn':'dim'}">${d.multiplier}</span>`;
 
+  const idleMs = Date.now() - LifeEngine.lastInteraction;
+  const p = attentionProbability(idleMs, LifeEngine.interactionMode, EmotionEngine.checkForEmotionalSignal()?.urgency || 0);
   document.getElementById('state-scheduler').innerHTML =
-    `<h3>⏱ Scheduler</h3>interval=<span class="val">${schedulerInterval/1000}s</span> running=<span class="${schedulerId?'val':'err'}">${!!schedulerId}</span>`;
+    `<h3>🧠 注意力调度</h3>P(想起)=<span class="val">${(p*100).toFixed(1)}%</span> 空闲=<span class="dim">${(idleMs/60000).toFixed(1)}min</span> 运行=<span class="${schedulerId?'val':'err'}">${!!schedulerId}</span>`;
 }
 
 function log(cat, msg) {
