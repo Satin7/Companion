@@ -468,18 +468,26 @@ const DecisionClient = {
     const desireLevel = EmotionState.desireLevel;
     const desireThreshold = 0.5;
 
-    // PRESENT mode: user is here chatting. Default: SILENT.
-    // Only speak if desire is very high (user silent within PRESENT) or emotional urgency.
-    if (interactionMode === 'PRESENT') {
-      if (desireLevel < 0.4) return TriggerDecision.noAction(); // firmly silent
-      if (desireLevel < desireThreshold && !emotionEvent) return TriggerDecision.noAction();
-      // desire > 0.5 or emotional signal: may gently follow up
-      if (!lifeEvent && !emotionEvent) return TriggerDecision.noAction();
-    }
-
-    // ABSENT mode: decide which strategy
+    // Determine strategy based on mode
     let strategy = 'reduce_frequency';
-    if (interactionMode === 'ABSENT') {
+    if (interactionMode === 'PRESENT') {
+      // PRESENT: follow-up style — continue the conversation, deepen topics
+      const userNeedCare = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.needCare : 0;
+      const userIntensity = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.intensity : 0;
+      const userHasQuestion = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.hasQuestion : false;
+
+      if (desireLevel < 0.3) return TriggerDecision.noAction();
+      if (userNeedCare > 0.3) {
+        strategy = 'follow_up_care';     // user hints at distress → follow up with care
+      } else if (userIntensity > 0.5 || userHasQuestion) {
+        strategy = 'follow_up_deepen';   // engaged conversation → deepen
+      } else if (desireLevel > desireThreshold) {
+        strategy = 'follow_up_light';    // gentle continuation
+      } else {
+        return TriggerDecision.noAction();
+      }
+    } else {
+      // ABSENT: check-in style — user may or may not reply
       const noReply = LifeEngine.consecutiveNoReply;
       const emotionUrgency = emotionEvent ? emotionEvent.urgency : 0;
       const userNeedCare = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.needCare : 0;
@@ -510,12 +518,18 @@ Interaction mode: ${interactionMode}. Companion strategy: ${strategy}.
 Desire level: ${desireLevel.toFixed(2)}. No-reply count: ${LifeEngine.consecutiveNoReply}.
 
 Guidelines:
-- PRESENT mode + desire < threshold: DO NOT speak (user is chatting, normal reply is enough)
-- PRESENT mode + desire > threshold + user silent: may gently check in
-- ABSENT check_in: user seems distressed/silent → ask if they're okay
-- ABSENT reduce_frequency: give space, speak less often
-- ABSENT keep_company: user hasn't replied to several messages, but keep sharing warmth
-- MORNING_CHECK_IN and INITIAL_GREETING are strong signals — speak warmly
+PRESENT strategies (user is actively chatting):
+- follow_up_care: user hinted at distress → offer warm, caring follow-up
+- follow_up_deepen: conversation is deep/engaged → ask a thoughtful question to continue
+- follow_up_light: natural, light continuation of the topic
+- Only speak if it feels like natural conversation flow, not forced
+
+ABSENT strategies (user may or may not reply):
+- check_in: user seems distressed/silent → gently ask if they're okay
+- reduce_frequency: give space, speak less often
+- keep_company: user hasn't replied to several messages, keep sharing warmth
+
+MORNING_CHECK_IN and INITIAL_GREETING are strong signals — speak warmly.
 Respond ONLY with JSON: {"shouldSpeak":bool,"topicHint":"short Chinese topic or null","confidence":0.0-1.0}`;
 
     try {
@@ -572,8 +586,8 @@ function attentionProbability(idleMs, mode, emotionUrgency) {
   const shortWave = Math.sin(2 * Math.PI * idleMs / SHORT_WAVE_MS) * 0.08;
   const longWave  = Math.sin(2 * Math.PI * idleMs / LONG_WAVE_MS) * 0.12;
 
-  // Mode modulation: PRESENT heavily suppresses attention (user is right there)
-  const modeFactor = mode === 'PRESENT' ? 0.15 : 1.0;
+  // Both modes have natural attention rhythm — PRESENT is for follow-up, ABSENT for check-in
+  const modeFactor = 1.0;
 
   // Emotional urgency boosts attention
   const emotionBoost = 1.0 + (emotionUrgency || 0) * 0.5;
