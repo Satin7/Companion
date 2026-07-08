@@ -16,6 +16,7 @@ import com.example.blankapp.scheduler.TriggerScheduler;
 import com.example.blankapp.state.PersonaState;
 import com.example.blankapp.state.PersonaStateManager;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -144,8 +145,8 @@ public class ProactiveOrchestrator {
         Log.d(TAG, "evaluatePostReply: userMessage='" + userMessage + "'");
         this.cachedMessages = messages;
 
-        // Feed lifecycle signal
-        lifeEngine.onUserMessage(System.currentTimeMillis());
+        // Feed lifecycle signal with message text for analysis
+        lifeEngine.onUserMessage(System.currentTimeMillis(), userMessage);
         scheduler.suggestNormal();
 
         // Analyse emotions from recent messages (async)
@@ -203,6 +204,7 @@ public class ProactiveOrchestrator {
                                     @Override
                                     public void onSuccess(String reply) {
                                         Log.i(TAG, "onTimerTick: proactive message generated successfully");
+                                        lifeEngine.onProactiveSent(System.currentTimeMillis());
                                         personaManager.evolveMood(0.2f);
                                         personaManager.persist(contactId);
                                         persistAll();
@@ -266,6 +268,7 @@ public class ProactiveOrchestrator {
                                 @Override
                                 public void onSuccess(String reply) {
                                     Log.i(TAG, "evaluateAllTriggers: proactive message generated");
+                                    lifeEngine.onProactiveSent(System.currentTimeMillis());
                                     // Evolve persona state based on proactive interaction
                                     personaManager.evolveEnergy(false, 0);
                                     if (emotionEvent != null) {

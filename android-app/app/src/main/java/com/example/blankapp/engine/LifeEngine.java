@@ -11,8 +11,10 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Tracks temporal patterns of user interaction and fires events when
- * user behaviour signals a meaningful window for proactive contact.
+ * LifeEngine — "Companion 的周围世界"
+ *
+ * Tracks what's happening around the Companion: time passing, user messages,
+ * and the interaction rhythm (PRESENT/ABSENT).
  *
  * State machine: IDLE → OBSERVING → READY → (back to OBSERVING)
  *
@@ -25,23 +27,32 @@ public class LifeEngine {
 
     // ── configurable thresholds ─────────────────────────────────
 
-    private static final float ENGAGEMENT_DROP_RATIO = 0.3f; // 30% of average
+    private static final float ENGAGEMENT_DROP_RATIO = 0.3f;
     private static final int MIN_INTERACTIONS_FOR_ENGAGEMENT_DROP = 5;
-    private static final long MIN_REPEAT_SIGNAL_INTERVAL_MS = 30 * 60 * 1000L; // 30 min cooldown
+    private static final long MIN_REPEAT_SIGNAL_INTERVAL_MS = 30 * 60 * 1000L;
+
+    // ── interaction mode ────────────────────────────────────────
+
+    public enum InteractionMode { PRESENT, ABSENT }
 
     // ── state ───────────────────────────────────────────────────
 
     enum State { IDLE, OBSERVING, READY }
 
     private State state = State.IDLE;
+    private InteractionMode interactionMode = InteractionMode.PRESENT;
     private long lastInteractionTimestamp;
+    private long lastProactiveSentTimestamp;
+    private int consecutiveNoReply;
     private int interactionCountToday;
-    private final Set<Integer> activeHours = new HashSet<>(); // hours of day (0-23) user is active
-    private int historicalDailyAvg = 10; // rolling estimate, seeded at 10
-    private long idleThresholdMs = 2 * 60 * 60 * 1000L; // default 2 hours
-    private long lastSignalTimestamp = 0; // prevent re-firing the same signal
+    private final Set<Integer> activeHours = new HashSet<>();
+    private int historicalDailyAvg = 10;
+    private long idleThresholdMs = 2 * 60 * 60 * 1000L;
+    private long lastSignalTimestamp = 0;
     private LifeEngineEvent.Reason lastSignalReason = null;
-    private boolean hasAnyInteraction = false; // true once user sends at least one message
+    private boolean hasAnyInteraction = false;
+    private float lastUserMsgNeedCare;
+    private float lastUserMsgIntensity;
 
     private final SharedPreferences prefs;
 
@@ -56,24 +67,76 @@ public class LifeEngine {
         this.idleThresholdMs = ms;
     }
 
+    // ── accessors ───────────────────────────────────────────────
+
+    public InteractionMode getInteractionMode() { return interactionMode; }
+    public int getConsecutiveNoReply() { return consecutiveNoReply; }
+    public long getLastInteractionTimestamp() { return lastInteractionTimestamp; }
+    public float getLastUserMsgNeedCare() { return lastUserMsgNeedCare; }
+    public float getLastUserMsgIntensity() { return lastUserMsgIntensity; }
+
     // ── input signals ───────────────────────────────────────────
 
-    /** Call when the user sends a message. */
+    /** Call when the user sends a message. Analyzes content for signals. */
     public void onUserMessage(long timestamp) {
+        onUserMessage(timestamp, null);
+    }
+
+    public void onUserMessage(long timestamp, String msgText) {
         lastInteractionTimestamp = timestamp;
         interactionCountToday++;
         hasAnyInteraction = true;
+        consecutiveNoReply = 0; // user replied → reset
 
         int hour = hourOfDay(timestamp);
         activeHours.add(hour);
 
-        // Update rolling average
         historicalDailyAvg = (historicalDailyAvg * 4 + interactionCountToday) / 5;
+
+        // Analyze message content (keyword-based, no LLM needed)
+        if (msgText != null && !msgText.isEmpty()) {
+            analyzeUserMessage(msgText);
+        }
+
+        // Switch to PRESENT if user is messaging
+        if (interactionMode == InteractionMode.ABSENT) {
+            Log.i(TAG, "InteractionState → PRESENT (user sent message)");
+            interactionMode = InteractionMode.PRESENT;
+        }
 
         if (state == State.IDLE) {
             state = State.OBSERVING;
         } else if (state == State.READY) {
-            state = State.OBSERVING; // user re-engaged, reset
+            state = State.OBSERVING;
+        }
+    }
+
+    /** Keyword-based user message analysis. Simple, fast, no LLM cost. */
+    private void analyzeUserMessage(String text) {
+        String[] needCareWords = {"累", "难", "烦", "焦虑", "压力", "不开心", "难过", "崩溃", "失眠", "害怕", "孤独", "担心", "不舒服", "生病"};
+        String[] intensityWords = {"太", "非常", "很", "特别", "急", "一直", "总是", "真的", "超级"};
+
+        int needCare = 0, intensity = 0;
+        for (String w : needCareWords) { if (text.contains(w)) needCare++; }
+        for (String w : intensityWords) { if (text.contains(w)) intensity++; }
+
+        lastUserMsgNeedCare = Math.min(1f, needCare * 0.4f);
+        lastUserMsgIntensity = Math.min(1f, intensity * 0.3f);
+    }
+
+    /** Call after Companion sends a proactive message (not a normal reply). */
+    public void onProactiveSent(long timestamp) {
+        lastProactiveSentTimestamp = timestamp;
+        consecutiveNoReply++;
+    }
+
+    /** Evaluate interaction mode transitions. */
+    public void evaluateInteractionMode(long now) {
+        long idleMs = now - lastInteractionTimestamp;
+        long absentThreshold = Math.min(idleThresholdMs, 5 * 60 * 1000L);
+        if (interactionMode == InteractionMode.PRESENT && idleMs > absentThreshold) {
+            interactionMode = InteractionMode.ABSENT;
+            Log.i(TAG, "InteractionState → ABSENT (silent " + (idleMs / 60000) + "min)");
         }
     }
 
@@ -117,52 +180,41 @@ public class LifeEngine {
 
     /** Returns an event if the engine is READY, otherwise null. */
     public LifeEngineEvent checkForLifeSignal(long now) {
+        evaluateInteractionMode(now);
+
         if (state != State.READY) return null;
 
         long idleMinutes = (now - lastInteractionTimestamp) / 60_000L;
-
         LifeEngineEvent.Reason reason;
         String hint;
 
-        // Determine the strongest signal
-        boolean freshContact = interactionCountToday == 0
-                && !hasAnyInteraction
-                && activeHours.isEmpty();
+        boolean freshContact = interactionCountToday == 0 && !hasAnyInteraction && activeHours.isEmpty();
 
         if (freshContact) {
             reason = LifeEngineEvent.Reason.INITIAL_GREETING;
-            hint = "用户还未进行过任何对话，是发起首次主动问候的好时机";
+            hint = "全新联系人，发起首次问候";
         } else if (interactionCountToday == 0 && hourOfDay(now) >= 10) {
             reason = LifeEngineEvent.Reason.MORNING_CHECK_IN;
-            hint = "用户今天还没有开始聊天，可以问候早安";
-        } else if (interactionCountToday >= MIN_INTERACTIONS_FOR_ENGAGEMENT_DROP
-                && historicalDailyAvg > 0
-                && interactionCountToday < historicalDailyAvg * ENGAGEMENT_DROP_RATIO) {
-            reason = LifeEngineEvent.Reason.ENGAGEMENT_DROP;
-            hint = "用户今天的互动明显少于平常，可能心情不好或很忙";
+            hint = "用户今天还没有聊天";
         } else {
             reason = LifeEngineEvent.Reason.PROLONGED_IDLE;
-            hint = "用户已经 " + idleMinutes + " 分钟没有互动了，通常在此时段活跃";
+            hint = "用户空闲 " + idleMinutes + " 分钟";
         }
 
-        // ── cooldown: don't re-fire the same reason too quickly ──
         if (reason == lastSignalReason
                 && (now - lastSignalTimestamp) < MIN_REPEAT_SIGNAL_INTERVAL_MS) {
-            Log.d(TAG, "checkForLifeSignal: cooldown active for reason=" + reason
-                    + ", remaining=" + (MIN_REPEAT_SIGNAL_INTERVAL_MS - (now - lastSignalTimestamp)) / 60_000L + "min");
-            state = State.OBSERVING; // stay quiet, try again later
+            Log.d(TAG, "checkForLifeSignal: cooldown active for " + reason);
+            state = State.OBSERVING;
             return null;
         }
 
-        float confidence = Math.min(0.95f, idleMinutes / 480f); // scales to 0.95 over 8h
-
-        // Transition back after firing
+        float confidence = Math.min(0.95f, idleMinutes / 480f);
         state = State.OBSERVING;
         lastSignalTimestamp = now;
         lastSignalReason = reason;
 
-        Log.i(TAG, "checkForLifeSignal: FIRING reason=" + reason
-                + ", confidence=" + confidence + ", idleMinutes=" + idleMinutes);
+        Log.i(TAG, "checkForLifeSignal: " + reason + " mode=" + interactionMode
+                + " idleMin=" + idleMinutes + " confidence=" + confidence);
         return new LifeEngineEvent(reason, confidence, hint, idleMinutes);
     }
 

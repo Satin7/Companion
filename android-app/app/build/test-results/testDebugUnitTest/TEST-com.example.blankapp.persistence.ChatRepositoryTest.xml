@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.example.blankapp.persistence.ChatRepositoryTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-07-08T03:07:50" hostname="codespaces-f1e830" time="0.013">
+<testsuite name="com.example.blankapp.persistence.ChatRepositoryTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-07-08T07:43:38" hostname="codespaces-f1e830" time="0.004">
   <properties/>
-  <testcase name="messagesWithChineseContent" classname="com.example.blankapp.persistence.ChatRepositoryTest" time="0.004"/>
+  <testcase name="messagesWithChineseContent" classname="com.example.blankapp.persistence.ChatRepositoryTest" time="0.002"/>
   <testcase name="encodeEmptyList" classname="com.example.blankapp.persistence.ChatRepositoryTest" time="0.0"/>
   <testcase name="decodeEmptyString" classname="com.example.blankapp.persistence.ChatRepositoryTest" time="0.0"/>
   <testcase name="decodeEmptyArray" classname="com.example.blankapp.persistence.ChatRepositoryTest" time="0.0"/>
-  <testcase name="emojiRoundtrip" classname="com.example.blankapp.persistence.ChatRepositoryTest" time="0.001"/>
-  <testcase name="encodeDecodeRoundtrip" classname="com.example.blankapp.persistence.ChatRepositoryTest" time="0.005"/>
+  <testcase name="emojiRoundtrip" classname="com.example.blankapp.persistence.ChatRepositoryTest" time="0.0"/>
+  <testcase name="encodeDecodeRoundtrip" classname="com.example.blankapp.persistence.ChatRepositoryTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

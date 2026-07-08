@@ -130,9 +130,10 @@ class EmotionalProfile {
 }
 
 class LifeEngineEvent {
-  constructor(reason, confidence, hint, idleMin) {
+  constructor(reason, confidence, hint, idleMin, userMsgSignal) {
     this.reason = reason; this.confidence = confidence;
     this.contextHint = hint; this.idleMinutes = idleMin;
+    this.userMsgSignal = userMsgSignal || null; // { intensity, depth, needCare }
   }
 }
 
@@ -150,78 +151,139 @@ class TriggerDecision {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// LIFE ENGINE
+// LIFE ENGINE — "Companion 的周围世界"
 // ═══════════════════════════════════════════════════════════════
 const LifeEngine = {
-  state: 'IDLE', // IDLE | OBSERVING | READY
+  state: 'IDLE',            // IDLE | OBSERVING | READY
+  interactionMode: 'PRESENT', // PRESENT | ABSENT
   lastInteraction: Date.now(),
+  lastProactiveSent: 0,     // timestamp of last proactive message Companion sent
+  consecutiveNoReply: 0,    // how many proactive messages without user reply
   interactionCount: 0,
-  idleThresholdMs: 2 * 60 * 60 * 1000, // 2h default
+  idleThresholdMs: 2 * 60 * 60 * 1000,
   activeHours: new Set(),
   histAvg: 10,
+  lastUserMsgSignal: null,  // { intensity, depth, needCare }
 
   reset() {
     this.state = 'IDLE';
+    this.interactionMode = 'PRESENT';
     this.lastInteraction = Date.now();
+    this.lastProactiveSent = 0;
+    this.consecutiveNoReply = 0;
     this.interactionCount = 0;
     this.activeHours.clear();
     this.histAvg = 10;
+    this.lastUserMsgSignal = null;
   },
 
-  onUserMessage(ts) {
-    this.lastInteraction = ts;
-    this.interactionCount++;
-    this.histAvg = Math.round((this.histAvg * 4 + this.interactionCount) / 5);
-    const h = new Date(ts).getHours();
-    this.activeHours.add(h);
-    if (this.state === 'IDLE') this.state = 'OBSERVING';
-    else if (this.state === 'READY') this.state = 'OBSERVING';
-  },
+  // ── drive source 1: time ──
 
   onTimerTick(now) {
     if (this.state === 'READY') return;
     const idleMs = now - this.lastInteraction;
-    const inWindow = this.activeHours.has(new Date(now).getHours());
-    const dropped = this.interactionCount > 0 && this.interactionCount < this.histAvg * 0.3;
+    const inWindow = this.activeHours.size === 0 || this.activeHours.has(new Date(now).getHours());
     const morning = new Date(now).getHours() >= 10 && this.interactionCount === 0;
-
-    // Also: INITIAL_GREETING for fresh contacts
     const initial = this.interactionCount === 0 && idleMs > this.idleThresholdMs;
 
-    if ((idleMs > this.idleThresholdMs && inWindow) || initial) {
+    if (morning) {
       this.state = 'READY';
-    } else if (dropped) {
+    } else if (initial) {
       this.state = 'READY';
-    } else if (morning) {
+    } else if (idleMs > this.idleThresholdMs && inWindow) {
       this.state = 'READY';
     }
   },
 
+  // ── drive source 2: user message ──
+
+  onUserMessage(ts, msgText) {
+    this.lastInteraction = ts;
+    this.interactionCount++;
+    this.histAvg = Math.round((this.histAvg * 4 + this.interactionCount) / 5);
+    this.activeHours.add(new Date(ts).getHours());
+    this.consecutiveNoReply = 0; // user replied → reset
+    if (this.state === 'IDLE') this.state = 'OBSERVING';
+    else if (this.state === 'READY') this.state = 'OBSERVING';
+
+    // Analyze message content (keyword-based, no LLM needed for this layer)
+    if (msgText) {
+      this.lastUserMsgSignal = this._analyzeMessage(msgText);
+    }
+  },
+
+  _analyzeMessage(text) {
+    const needCareWords = ['累', '难', '烦', '焦虑', '压力', '不开心', '难过', '崩溃', '失眠', '害怕', '孤独', '担心', '不舒服', '生病', '失败', '被拒', '分手', '迷茫', '空虚'];
+    const intensityWords = ['太', '非常', '很', '特别', '急', '快', '一直', '总是', '真的', '超级', '好', '极'];
+    const questionWords = ['?', '？', '吗', '呢', '吧', '怎么', '什么', '能不能', '要不要', '可以吗'];
+
+    let needCare = 0, intensity = 0;
+    for (const w of needCareWords) { if (text.includes(w)) needCare++; }
+    for (const w of intensityWords) { if (text.includes(w)) intensity++; }
+    const hasQuestion = questionWords.some(w => text.includes(w));
+    const depth = Math.min(1, text.length / 100); // longer messages = deeper
+
+    // Switch to PRESENT (user is here, talking)
+    if (this.interactionMode !== 'PRESENT') {
+      log('event', `📡 InteractionState → PRESENT (用户发来消息)`);
+      this.interactionMode = 'PRESENT';
+    }
+
+    return { intensity: Math.min(1, intensity * 0.3), depth, needCare: Math.min(1, needCare * 0.4), hasQuestion, textLength: text.length };
+  },
+
+  // ── interaction mode ──
+
+  /** Call after Companion sends a proactive message (not a reply). */
+  onProactiveSent(ts) {
+    this.lastProactiveSent = ts;
+    this.consecutiveNoReply++;
+  },
+
+  /**
+   * Evaluate whether interaction mode should change.
+   * - PRESENT → ABSENT: user goes quiet for a while
+   * - ABSENT → PRESENT: user sends a message (handled in onUserMessage)
+   */
+  evaluateInteractionMode(now) {
+    const idleMs = now - this.lastInteraction;
+    // PRESENT → ABSENT when user has been silent beyond threshold
+    // In test mode with 1min idle threshold, use a shorter ABSENT switch time
+    const absentThreshold = Math.min(this.idleThresholdMs, 5 * 60 * 1000); // min of idleThreshold or 5min
+    if (this.interactionMode === 'PRESENT' && idleMs > absentThreshold) {
+      this.interactionMode = 'ABSENT';
+      log('event', `📡 InteractionState → ABSENT (用户沉默 ${Math.floor(idleMs/60000)}min)`);
+    }
+  },
+
+  // ── unified output ──
+
   checkForLifeSignal(now) {
+    this.evaluateInteractionMode(now);
     if (this.state !== 'READY') return null;
     const idleMin = Math.floor((now - this.lastInteraction) / 60000);
     let reason, hint;
     if (this.interactionCount === 0 && idleMin > 0) {
-      reason = 'INITIAL_GREETING'; hint = '这是一个新联系人，还没有任何互动，可以发起问候';
+      reason = 'INITIAL_GREETING'; hint = '全新联系人，发起首次问候';
     } else if (this.interactionCount === 0 && new Date(now).getHours() >= 10) {
-      reason = 'MORNING_CHECK_IN'; hint = '用户今天还没有开始聊天';
-    } else if (this.interactionCount > 0 && this.interactionCount < this.histAvg * 0.3) {
-      reason = 'ENGAGEMENT_DROP'; hint = '用户今天互动明显少于平常';
+      reason = 'MORNING_CHECK_IN'; hint = '用户今天还没有聊天';
     } else {
-      reason = 'PROLONGED_IDLE'; hint = `用户已空闲 ${idleMin} 分钟，通常在此时段活跃`;
+      reason = 'PROLONGED_IDLE'; hint = `用户空闲 ${idleMin} 分钟`;
     }
     this.state = 'OBSERVING';
-    return new LifeEngineEvent(reason, Math.min(0.95, idleMin / 480), hint, idleMin);
+    return new LifeEngineEvent(reason, Math.min(0.95, idleMin / 480), hint, idleMin,
+      this.lastUserMsgSignal ? { ...this.lastUserMsgSignal } : null);
   },
 
   status() {
     return {
       state: this.state,
+      mode: this.interactionMode,
       idleMin: Math.floor((Date.now() - this.lastInteraction) / 60000),
       thresholdMin: Math.floor(this.idleThresholdMs / 60000),
       interactions: this.interactionCount,
-      histAvg: this.histAvg,
-      activeHours: [...this.activeHours].join(','),
+      noReply: this.consecutiveNoReply,
+      lastMsg: this.lastUserMsgSignal,
     };
   },
 };
@@ -337,8 +399,51 @@ const EmotionEngine = {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// PERSONA STATE
+// EMOTION ENGINE — "Companion 的感受层" (desire lives here)
 // ═══════════════════════════════════════════════════════════════
+const EmotionState = {
+  desireLevel: 0.0,          // 连接欲望 0~1
+  desireBaseRate: 0.05,      // 基础积累速度 / 每分钟
+  desireMultiplier: 1.0,     // 情感调节乘数
+
+  reset() {
+    this.desireLevel = 0.0;
+    this.desireBaseRate = 0.05;
+    this.desireMultiplier = 1.0;
+  },
+
+  /** Called every tick: accumulate desire based on idle time and emotional state */
+  accumulateDesire(idleMinutes, emotionUrgency) {
+    const gain = idleMinutes * this.desireBaseRate * this.desireMultiplier;
+    this.desireLevel = Math.min(1.0, this.desireLevel + gain);
+    // emotionUrgency boosts multiplier for next round
+    if (emotionUrgency > 0.3) this.desireMultiplier = 1.0 + emotionUrgency * 1.5;
+    else this.desireMultiplier = Math.max(0.5, this.desireMultiplier - 0.05); // decay
+  },
+
+  /** User interaction or proactive message satisfies desire */
+  satisfyDesire() {
+    this.desireLevel = Math.max(0, this.desireLevel - 0.4);
+    this.desireMultiplier = 1.0;
+  },
+
+  /** User message content can nudge desire up or down */
+  nudgeDesire(userMsgSignal) {
+    if (!userMsgSignal) return;
+    if (userMsgSignal.needCare > 0.3) this.desireLevel += 0.1; // user needs care → desire up
+    if (userMsgSignal.hasQuestion) this.desireLevel += 0.05;    // user asking → desire up
+  },
+
+  status() {
+    return {
+      desire: this.desireLevel.toFixed(2),
+      rate: this.desireBaseRate.toFixed(3),
+      multiplier: this.desireMultiplier.toFixed(2),
+    };
+  },
+};
+
+// ── Persona (compatibility) ──
 const Persona = {
   energy: 0.7, mood: 0.7, curiosity: 3, care: 3, sharing: 3, memory: 3,
   openness: 0.5, emotionalResonance: 0.5,
@@ -353,21 +458,54 @@ const Persona = {
 // ═══════════════════════════════════════════════════════════════
 const DecisionClient = {
   async decide(messages, lifeEvent, emotionEvent) {
-    if (!lifeEvent && !emotionEvent) return TriggerDecision.noAction();
+    const interactionMode = LifeEngine.interactionMode;
+    const desireLevel = EmotionState.desireLevel;
+    const desireThreshold = 0.5;
+
+    // PRESENT mode: user is here, no proactive needed (just reply normally)
+    if (interactionMode === 'PRESENT' && desireLevel < desireThreshold) {
+      if (!lifeEvent) return TriggerDecision.noAction();
+    }
+
+    // ABSENT mode: decide which strategy
+    let strategy = 'reduce_frequency'; // default: 减频等待
+    if (interactionMode === 'ABSENT') {
+      const noReply = LifeEngine.consecutiveNoReply;
+      const emotionUrgency = emotionEvent ? emotionEvent.urgency : 0;
+      const userNeedCare = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.needCare : 0;
+
+      if (emotionUrgency > 0.5 || userNeedCare > 0.5) {
+        strategy = 'check_in';        // 追问关心
+      } else if (noReply > 3 && desireLevel > 0.7) {
+        strategy = 'keep_company';    // 持续陪伴
+      } else if (noReply > 2) {
+        strategy = 'reduce_frequency'; // 减频等待
+      }
+    }
+
+    if (!lifeEvent && !emotionEvent && desireLevel < desireThreshold) return TriggerDecision.noAction();
 
     const ctx = {
+      interactionMode,
+      strategy,
+      desireLevel: desireLevel.toFixed(2),
+      consecutiveNoReply: LifeEngine.consecutiveNoReply,
       recentConversation: messages.slice(-8).map(m => ({ role: m.role, content: m.content.slice(0, 200) })),
       lifeEvent: lifeEvent ? { reason: lifeEvent.reason, idleMinutes: lifeEvent.idleMinutes, contextHint: lifeEvent.contextHint } : null,
       emotionEvent: emotionEvent ? { reason: emotionEvent.reason, urgency: emotionEvent.urgency, valence: emotionEvent.snapshot.valence, arousal: emotionEvent.snapshot.arousal } : null,
-      personaState: { energy: Persona.energy, mood: Persona.mood, motivation: Persona.motivation() },
     };
 
     const sys = `You are a proactive companion decision engine.
-Given context, decide whether to proactively check in.
-- INITIAL_GREETING and MORNING_CHECK_IN are ALWAYS strong signals — speak warmly
-- Emotional distress is a strong signal — speak with care
-- ENGAGEMENT_DROP and PROLONGED_IDLE: speak if context supports
-- If user is actively chatting, prefer NOT to interrupt
+Interaction mode: ${interactionMode}. Companion strategy: ${strategy}.
+Desire level: ${desireLevel.toFixed(2)}. No-reply count: ${LifeEngine.consecutiveNoReply}.
+
+Guidelines:
+- PRESENT mode + desire < threshold: DO NOT speak (user is chatting, normal reply is enough)
+- PRESENT mode + desire > threshold + user silent: may gently check in
+- ABSENT check_in: user seems distressed/silent → ask if they're okay
+- ABSENT reduce_frequency: give space, speak less often
+- ABSENT keep_company: user hasn't replied to several messages, but keep sharing warmth
+- MORNING_CHECK_IN and INITIAL_GREETING are strong signals — speak warmly
 Respond ONLY with JSON: {"shouldSpeak":bool,"topicHint":"short Chinese topic or null","confidence":0.0-1.0}`;
 
     try {
@@ -423,8 +561,10 @@ function enableTestMode() {
   log('event', '🧪 TEST MODE: idleThreshold=1min, tick=30s');
 }
 
-async function evaluatePostReply(messages) {
-  LifeEngine.onUserMessage(Date.now());
+async function evaluatePostReply(userText, messages) {
+  LifeEngine.onUserMessage(Date.now(), userText);
+  EmotionState.satisfyDesire();
+  EmotionState.nudgeDesire(LifeEngine.lastUserMsgSignal);
   await EmotionEngine.analyze(messages);
   await evaluateAllTriggers(messages);
 }
@@ -432,10 +572,17 @@ async function evaluatePostReply(messages) {
 async function onTimerTick() {
   if (!document.getElementById('api-key').value.trim()) return;
 
-  LifeEngine.onTimerTick(Date.now());
-  const lifeEvent = LifeEngine.checkForLifeSignal(Date.now());
+  const now = Date.now();
+  LifeEngine.onTimerTick(now);
+
+  // Accumulate desire based on idle time
+  const idleMin = (now - LifeEngine.lastInteraction) / 60000;
+  const emotionUrgency = EmotionEngine.checkForEmotionalSignal()?.urgency || 0;
+  EmotionState.accumulateDesire(Math.max(0.5, idleMin), emotionUrgency);
+
+  const lifeEvent = LifeEngine.checkForLifeSignal(now);
   if (lifeEvent) {
-    log('event', `🔔 LifeEvent: ${lifeEvent.reason} (idle=${lifeEvent.idleMinutes}min)`);
+    log('event', `🔔 LifeEvent: ${lifeEvent.reason} mode=${LifeEngine.interactionMode} desire=${EmotionState.desireLevel.toFixed(2)} (idle=${lifeEvent.idleMinutes}min)`);
     await EmotionEngine.analyze(getMessages());
     await evaluateAllTriggers(getMessages(), lifeEvent);
   } else {
@@ -444,21 +591,21 @@ async function onTimerTick() {
 }
 
 async function evaluateAllTriggers(messages, lifeEventFromTimer) {
-  // Timer path passes the event to avoid double-consumption; post-reply path checks fresh
   const lifeEvent = lifeEventFromTimer || LifeEngine.checkForLifeSignal(Date.now());
   const emotionEvent = EmotionEngine.checkForEmotionalSignal();
-  if (emotionEvent) log('event', `🔔 EmotionEvent: ${emotionEvent.reason} urgency=${emotionEvent.urgency.toFixed(2)}`);
-
-  if (!lifeEvent && !emotionEvent) { updateDebug(); return; }
+  if (emotionEvent) log('event', `💭 EmotionEvent: ${emotionEvent.reason} urgency=${emotionEvent.urgency.toFixed(2)}`);
 
   const decision = await DecisionClient.decide(messages, lifeEvent, emotionEvent);
+  log('decision', `→ ${decision.shouldSpeak?'SPEAK':'SILENT'} mode=${LifeEngine.interactionMode} desire=${EmotionState.desireLevel.toFixed(2)} strategy=${LifeEngine.interactionMode==='ABSENT'?'check_in/reduce/company':'N/A'}`);
   if (!decision.shouldSpeak) { updateDebug(); return; }
 
   try {
     const msg = await DecisionClient.generateMessage(decision.topicHint, messages);
     addMessage('assistant', '[主动关心] ' + msg, true);
+    LifeEngine.onProactiveSent(Date.now());
+    EmotionState.satisfyDesire();
     Persona.mood = Math.min(1, Persona.mood + 0.05);
-    log('event', `✅ Proactive message sent`);
+    log('event', `✅ Proactive sent (noReply=${LifeEngine.consecutiveNoReply})`);
   } catch (e) {
     log('error', `Generate failed: ${e.message}`);
   }
@@ -584,7 +731,7 @@ async function send() {
     addMessage('assistant', reply);
 
     // Post-reply proactive evaluation + memory update
-    await evaluatePostReply(chatMessages);
+    await evaluatePostReply(text, chatMessages);
     updateMemory(chatMessages); // async, best-effort
     updateDebug();
   } catch (e) {
@@ -601,16 +748,30 @@ function saveApiKey() {
 
 function updateDebug() {
   const l = LifeEngine.status();
+  const modeColor = l.mode === 'PRESENT' ? 'val' : 'warn';
   document.getElementById('state-life').innerHTML =
-    `<h3>🕐 LifeEngine</h3>state=<span class="val">${l.state}</span> idle=<span class="val">${l.idleMin}min</span> (threshold=${l.thresholdMin}min)<br>interactions=<span class="dim">${l.interactions}</span> avg=<span class="dim">${l.histAvg}</span> hours=<span class="dim">${l.activeHours||'none'}</span>`;
+    `<h3>🌍 LifeEngine (周围世界)</h3>`
+    + `模式=<span class="${modeColor}">${l.mode}</span> `
+    + `引擎状态=<span class="val">${l.state}</span> `
+    + `空闲=<span class="val">${l.idleMin}min</span> (阈值=${l.thresholdMin}min)<br>`
+    + `互动次数=<span class="dim">${l.interactions}</span> `
+    + `未回复=<span class="${l.noReply>2?'err':'dim'}">${l.noReply}</span> `
+    + (l.lastMsg ? `用户信号=(强度${l.lastMsg.intensity?.toFixed(1)} 关心${l.lastMsg.needCare?.toFixed(1)})` : '');
 
   const e = EmotionEngine.status();
   document.getElementById('state-emotion').innerHTML =
-    `<h3>💭 EmotionEngine</h3>state=<span class="${e.state==='DISTRESSED'?'err':e.state==='HEIGHTENED'?'warn':'val'}">${e.state}</span> V=<span class="val">${e.valence}</span> A=<span class="val">${e.arousal}</span> base=<span class="dim">${e.baselineVal}</span> derail=<span class="dim">${e.derailment}</span>`;
+    `<h3>💭 EmotionEngine (感受)</h3>`
+    + `状态=<span class="${e.state==='DISTRESSED'?'err':e.state==='HEIGHTENED'?'warn':'val'}">${e.state}</span> `
+    + `V=<span class="val">${e.valence}</span> A=<span class="val">${e.arousal}</span><br>`
+    + `基线V=<span class="dim">${e.baselineVal}</span> `
+    + `偏离=<span class="dim">${e.derailment}</span>`;
 
-  const p = Persona.status();
+  const d = EmotionState.status();
   document.getElementById('state-persona').innerHTML =
-    `<h3>🧠 Persona</h3>energy=<span class="val">${p.energy}</span> mood=<span class="val">${p.mood}</span> motivation=<span class="val">${p.motivation}</span>`;
+    `<h3>❤️ 欲望 (Emotion)</h3>`
+    + `欲望=<span class="val">${d.desire}</span> `
+    + `基础速率=<span class="dim">${d.rate}</span> `
+    + `情感乘数=<span class="${d.multiplier>1.3?'warn':'dim'}">${d.multiplier}</span>`;
 
   document.getElementById('state-scheduler').innerHTML =
     `<h3>⏱ Scheduler</h3>interval=<span class="val">${schedulerInterval/1000}s</span> running=<span class="${schedulerId?'val':'err'}">${!!schedulerId}</span>`;
@@ -668,6 +829,7 @@ document.getElementById('contact-select').onchange = function() {
   }
   LifeEngine.reset();
   EmotionEngine.reset();
+  EmotionState.reset();
   Persona.reset();
   updateDebug();
 };
