@@ -59,7 +59,6 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
     </select>
     <span style="font-size:12px;margin-left:8px">模式:</span>
     <select id="mode-toggle" onchange="onModeToggle()">
-      <option value="auto">自动</option>
       <option value="PRESENT">PRESENT (强互动)</option>
       <option value="ABSENT">ABSENT (弱互动)</option>
     </select>
@@ -229,11 +228,8 @@ const LifeEngine = {
     const hasQuestion = questionWords.some(w => text.includes(w));
     const depth = Math.min(1, text.length / 100); // longer messages = deeper
 
-    // Switch to PRESENT (user is here, talking)
-    if (this.interactionMode !== 'PRESENT') {
-      log('event', `📡 InteractionState → PRESENT (用户发来消息)`);
-      this.interactionMode = 'PRESENT';
-    }
+    // User message is a world event — no auto mode switching
+    // Mode is the user's choice, set manually
 
     return { intensity: Math.min(1, intensity * 0.3), depth, needCare: Math.min(1, needCare * 0.4), hasQuestion, textLength: text.length };
   },
@@ -246,26 +242,10 @@ const LifeEngine = {
     this.consecutiveNoReply++;
   },
 
-  /**
-   * Evaluate whether interaction mode should change.
-   * - PRESENT → ABSENT: user goes quiet for a while
-   * - ABSENT → PRESENT: user sends a message (handled in onUserMessage)
-   */
-  evaluateInteractionMode(now) {
-    const idleMs = now - this.lastInteraction;
-    // PRESENT → ABSENT when user has been silent beyond threshold
-    // In test mode with 1min idle threshold, use a shorter ABSENT switch time
-    const absentThreshold = Math.min(this.idleThresholdMs, 5 * 60 * 1000); // min of idleThreshold or 5min
-    if (this.interactionMode === 'PRESENT' && idleMs > absentThreshold) {
-      this.interactionMode = 'ABSENT';
-      log('event', `📡 InteractionState → ABSENT (用户沉默 ${Math.floor(idleMs/60000)}min)`);
-    }
-  },
-
   // ── unified output ──
 
   checkForLifeSignal(now) {
-    this.evaluateInteractionMode(now);
+    // Mode is user-controlled (manual switch), no auto-evaluation
     if (this.state !== 'READY') return null;
     const idleMin = Math.floor((now - this.lastInteraction) / 60000);
     let reason, hint;
@@ -427,6 +407,12 @@ const EmotionState = {
     else this.desireMultiplier = Math.max(0.5, this.desireMultiplier - 0.05); // decay
   },
 
+  /** User entering PRESENT mode: companion has accumulated things to say. */
+  entryBurst() {
+    this.desireLevel = Math.min(1.0, this.desireLevel + 0.35);
+    log('event', `💥 Desire burst: ${this.desireLevel.toFixed(2)} (PRESENT entry)`);
+  },
+
   /** User interaction or proactive message satisfies desire */
   satisfyDesire() {
     this.desireLevel = Math.max(0, this.desireLevel - 0.4);
@@ -471,18 +457,21 @@ const DecisionClient = {
     // Determine strategy based on mode
     let strategy = 'reduce_frequency';
     if (interactionMode === 'PRESENT') {
-      // PRESENT: follow-up style — continue the conversation, deepen topics
+      // PRESENT: user is here — easier to engage, natural conversation flow
       const userNeedCare = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.needCare : 0;
       const userIntensity = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.intensity : 0;
       const userHasQuestion = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.hasQuestion : false;
 
-      if (desireLevel < 0.3) return TriggerDecision.noAction();
-      if (userNeedCare > 0.3) {
-        strategy = 'follow_up_care';     // user hints at distress → follow up with care
-      } else if (userIntensity > 0.5 || userHasQuestion) {
-        strategy = 'follow_up_deepen';   // engaged conversation → deepen
-      } else if (desireLevel > desireThreshold) {
-        strategy = 'follow_up_light';    // gentle continuation
+      // Lower threshold: in PRESENT, even small desire triggers (user is here, talk naturally)
+      const presentThreshold = 0.15;
+      if (desireLevel < presentThreshold) return TriggerDecision.noAction();
+
+      if (userNeedCare > 0.2) {
+        strategy = 'follow_up_care';
+      } else if (userIntensity > 0.3 || userHasQuestion) {
+        strategy = 'follow_up_deepen';
+      } else if (desireLevel > presentThreshold) {
+        strategy = 'follow_up_light';
       } else {
         return TriggerDecision.noAction();
       }
@@ -548,7 +537,25 @@ Respond ONLY with JSON: {"shouldSpeak":bool,"topicHint":"short Chinese topic or 
   },
 
   async generateMessage(topicHint, messages) {
-    const sys = `你是一个温暖、理性且有主动关心能力的AI伴侣。你需要主动发起一段简短的对话。语气自然、真诚，不要像机器人。不要用"我注意到"、"根据分析"这类机械的表达。像一个真正关心朋友的人那样说话。保持简短（2-4句话）。` + memoryContext();
+    const mode = LifeEngine.interactionMode;
+    let sys;
+    if (mode === 'PRESENT') {
+      sys = `你正在和用户进行实时对话。用户就在旁边，你们在聊天。你需要主动承接话题或发起自然延续。
+语气要求：
+- 像是在面对面聊天一样自然，承接刚才的话题
+- 可以用"对了"、"说起来"、"你刚才说..."这类自然的承接词
+- 可以追问细节、分享感受、或者提出新话题
+- 不要像在检查用户近况（那是留言模式才做的），要用在场聊天的语气
+- 保持简短（2-4句话）` + memoryContext();
+    } else {
+      sys = `用户在不在场状态，可能回也可能不回你的消息。你需要主动关心或陪伴。
+语气要求：
+- 温暖、自然、不催促，像给朋友留言
+- 不要假装知道用户当下的状态（你不在场）
+- 可以分享你想到的事、关心用户近况、或者给一个温暖的问候
+- 不要用"我注意到"、"根据分析"这类机械的表达
+- 保持简短（2-4句话）` + memoryContext();
+    }
     let ctx = '最近的对话：\n';
     for (const m of messages.slice(-8)) ctx += `${m.role==='user'?'用户':'AI'}: ${m.content}\n`;
     if (topicHint) ctx += `\n建议话题：${topicHint}\n`;
@@ -653,28 +660,17 @@ function enableTestMode() {
   log('event', '🧪 TEST MODE: idleThreshold=1min, attention intervals compressed');
 }
 
-let manualMode = 'auto'; // 'auto' | 'PRESENT' | 'ABSENT'
 function onModeToggle() {
-  manualMode = document.getElementById('mode-toggle').value;
-  if (manualMode === 'PRESENT') {
-    LifeEngine.interactionMode = 'PRESENT';
-    log('event', '📡 手动切换 → PRESENT (强互动)');
-  } else if (manualMode === 'ABSENT') {
-    LifeEngine.interactionMode = 'ABSENT';
-    log('event', '📡 手动切换 → ABSENT (弱互动)');
+  const newMode = document.getElementById('mode-toggle').value;
+  const oldMode = LifeEngine.interactionMode;
+  LifeEngine.interactionMode = newMode;
+  if (newMode === 'PRESENT' && oldMode !== 'PRESENT') {
+    EmotionState.entryBurst();
+    log('event', '📡 切换 → PRESENT (强互动) 💥 desire burst');
   } else {
-    // auto: restore from engine's natural evaluation
-    LifeEngine.evaluateInteractionMode(Date.now());
-    log('event', '📡 切换回自动模式');
+    log('event', `📡 切换 → ${newMode}`);
   }
 }
-
-// Override evaluateInteractionMode to respect manual toggle
-const _origEvaluateInteractionMode = LifeEngine.evaluateInteractionMode;
-LifeEngine.evaluateInteractionMode = function(now) {
-  if (manualMode !== 'auto') return; // manual override
-  _origEvaluateInteractionMode.call(this, now);
-};
 
 async function evaluatePostReply(userText, messages) {
   LifeEngine.onUserMessage(Date.now(), userText);
