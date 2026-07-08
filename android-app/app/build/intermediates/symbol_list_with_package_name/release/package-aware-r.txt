@@ -3107,6 +3107,7 @@ id center_horizontal
 id center_vertical
 id chain
 id chains
+id chatScrollView
 id chatTitle
 id checkbox
 id checked

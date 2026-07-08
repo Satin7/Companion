@@ -23,13 +23,13 @@
 <tr>
 <td>
 <div class="infoBox" id="tests">
-<div class="counter">1</div>
+<div class="counter">2</div>
 <p>tests</p>
 </div>
 </td>
 <td>
 <div class="infoBox" id="failures">
-<div class="counter">1</div>
+<div class="counter">0</div>
 <p>failures</p>
 </div>
 </td>
@@ -41,7 +41,7 @@
 </td>
 <td>
 <div class="infoBox" id="duration">
-<div class="counter">5.540s</div>
+<div class="counter">0.003s</div>
 <p>duration</p>
 </div>
 </td>
@@ -50,8 +50,8 @@
 </div>
 </td>
 <td>
-<div class="infoBox failures" id="successRate">
-<div class="percent">0%</div>
+<div class="infoBox success" id="successRate">
+<div class="percent">100%</div>
 <p>successful</p>
 </div>
 </td>
@@ -61,65 +61,10 @@
 <div id="tabs">
 <ul class="tabLinks">
 <li>
-<a href="#tab0">Failed tests</a>
-</li>
-<li>
-<a href="#tab1">Tests</a>
+<a href="#tab0">Tests</a>
 </li>
 </ul>
 <div id="tab0" class="tab">
-<h2>Failed tests</h2>
-<div class="test">
-<a name="storesAndReadsApiKey"></a>
-<h3 class="failures">storesAndReadsApiKey</h3>
-<span class="code">
-<pre>java.lang.NoClassDefFoundError: android/webkit/RoboCookieManager
-	at org.robolectric.Shadows.reset(Shadows.java:2748)
-	at org.robolectric.android.internal.AndroidTestEnvironment.resetState(AndroidTestEnvironment.java:667)
-	at org.robolectric.RobolectricTestRunner.lambda$finallyAfterTest$0(RobolectricTestRunner.java:370)
-	at org.robolectric.util.PerfStatsCollector.measure(PerfStatsCollector.java:86)
-	at org.robolectric.RobolectricTestRunner.finallyAfterTest(RobolectricTestRunner.java:368)
-	at org.robolectric.internal.SandboxTestRunner$2.lambda$evaluate$2(SandboxTestRunner.java:298)
-	at org.robolectric.internal.bytecode.Sandbox.lambda$runOnMainThread$0(Sandbox.java:101)
-	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:328)
-	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
-	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
-	at java.base/java.lang.Thread.run(Thread.java:1474)
-Caused by: java.lang.ClassNotFoundException: couldn't load android.webkit.RoboCookieManager
-	at org.robolectric.internal.bytecode.SandboxClassLoader.maybeInstrumentClass(SandboxClassLoader.java:164)
-	at org.robolectric.internal.bytecode.SandboxClassLoader.lambda$loadClass$0(SandboxClassLoader.java:136)
-	at org.robolectric.util.PerfStatsCollector.measure(PerfStatsCollector.java:53)
-	at org.robolectric.internal.bytecode.SandboxClassLoader.loadClass(SandboxClassLoader.java:136)
-	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:490)
-	... 11 more
-Caused by: java.lang.IllegalArgumentException: Unsupported class file major version 69
-	at org.objectweb.asm.ClassReader.&lt;init&gt;(ClassReader.java:200)
-	at org.objectweb.asm.ClassReader.&lt;init&gt;(ClassReader.java:180)
-	at org.objectweb.asm.ClassReader.&lt;init&gt;(ClassReader.java:166)
-	at org.robolectric.internal.bytecode.ClassNodeProvider.createClassNode(ClassNodeProvider.java:24)
-	at org.robolectric.internal.bytecode.ClassNodeProvider.getClassNode(ClassNodeProvider.java:16)
-	at org.robolectric.internal.bytecode.InstrumentingClassWriter.typeInfo(InstrumentingClassWriter.java:115)
-	at org.robolectric.internal.bytecode.InstrumentingClassWriter.getCommonSuperClass(InstrumentingClassWriter.java:36)
-	at org.objectweb.asm.SymbolTable.addMergedType(SymbolTable.java:1264)
-	at org.objectweb.asm.Frame.merge(Frame.java:1311)
-	at org.objectweb.asm.Frame.merge(Frame.java:1218)
-	at org.objectweb.asm.MethodWriter.computeAllFrames(MethodWriter.java:1612)
-	at org.objectweb.asm.MethodWriter.visitMaxs(MethodWriter.java:1548)
-	at org.objectweb.asm.MethodVisitor.visitMaxs(MethodVisitor.java:786)
-	at org.objectweb.asm.tree.MethodNode.accept(MethodNode.java:767)
-	at org.objectweb.asm.tree.MethodNode.accept(MethodNode.java:647)
-	at org.objectweb.asm.tree.ClassNode.accept(ClassNode.java:468)
-	at org.robolectric.internal.bytecode.ClassInstrumentor.instrumentToBytes(ClassInstrumentor.java:125)
-	at org.robolectric.internal.bytecode.ClassInstrumentor.lambda$instrument$1(ClassInstrumentor.java:140)
-	at org.robolectric.util.PerfStatsCollector.measure(PerfStatsCollector.java:53)
-	at org.robolectric.internal.bytecode.ClassInstrumentor.instrument(ClassInstrumentor.java:140)
-	at org.robolectric.internal.bytecode.SandboxClassLoader.maybeInstrumentClass(SandboxClassLoader.java:156)
-	... 15 more
-</pre>
-</span>
-</div>
-</div>
-<div id="tab1" class="tab">
 <h2>Tests</h2>
 <table>
 <thead>
@@ -130,9 +75,14 @@ Caused by: java.lang.IllegalArgumentException: Unsupported class file major vers
 </tr>
 </thead>
 <tr>
-<td class="failures">storesAndReadsApiKey</td>
-<td class="failures">5.540s</td>
-<td class="failures">failed</td>
+<td class="success">nullContextReturnsDefaults</td>
+<td class="success">0.002s</td>
+<td class="success">passed</td>
+</tr>
+<tr>
+<td class="success">saveAndRead_withNullContext_doesNotCrash</td>
+<td class="success">0.001s</td>
+<td class="success">passed</td>
 </tr>
 </table>
 </div>
@@ -144,7 +94,7 @@ Caused by: java.lang.IllegalArgumentException: Unsupported class file major vers
 <input id="line-wrapping-toggle" type="checkbox" autocomplete="off"/>
 </label>
 </div>Generated by 
-<a href="http://www.gradle.org">Gradle 8.6</a> at Jul 6, 2026, 2:07:26 PM</p>
+<a href="http://www.gradle.org">Gradle 8.6</a> at Jul 8, 2026, 3:07:50 AM</p>
 </div>
 </div>
 </body>

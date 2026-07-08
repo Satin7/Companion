@@ -13,7 +13,9 @@ public class LifeEngineEvent {
         /** It's morning / start of typical active hours and user hasn't chatted yet. */
         MORNING_CHECK_IN,
         /** User just returned after a long gap — welcome-back moment. */
-        RETURN_AFTER_GAP
+        RETURN_AFTER_GAP,
+        /** Fresh contact with zero interaction history — prime time for first greeting. */
+        INITIAL_GREETING
     }
 
     public final Reason reason;

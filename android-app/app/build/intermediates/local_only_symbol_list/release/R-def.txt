@@ -5,6 +5,7 @@ drawable ic_launcher_foreground
 id btnSaveSettings
 id btnSend
 id btnSettings
+id chatScrollView
 id chatTitle
 id contactAvatar
 id contactName

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.blankapp.state.PersonaStateTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-07-08T03:07:50" hostname="codespaces-f1e830" time="0.008">
+  <properties/>
+  <testcase name="copyCreatesIndependentClone" classname="com.example.blankapp.state.PersonaStateTest" time="0.004"/>
+  <testcase name="clampValues" classname="com.example.blankapp.state.PersonaStateTest" time="0.0"/>
+  <testcase name="jsonRoundtrip" classname="com.example.blankapp.state.PersonaStateTest" time="0.001"/>
+  <testcase name="motivationSumsAllFour" classname="com.example.blankapp.state.PersonaStateTest" time="0.0"/>
+  <testcase name="defaultValues" classname="com.example.blankapp.state.PersonaStateTest" time="0.0"/>
+  <testcase name="isReceptive" classname="com.example.blankapp.state.PersonaStateTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

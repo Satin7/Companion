@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.blankapp.engine.LifeEngineTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-07-08T03:07:50" hostname="codespaces-f1e830" time="0.014">
+  <properties/>
+  <testcase name="onUserMessage_transitionsToObserving" classname="com.example.blankapp.engine.LifeEngineTest" time="0.001"/>
+  <testcase name="userMessageResetsReadyState" classname="com.example.blankapp.engine.LifeEngineTest" time="0.001"/>
+  <testcase name="afterUserMessage_firingResets" classname="com.example.blankapp.engine.LifeEngineTest" time="0.002"/>
+  <testcase name="testMode_withShortThreshold_triggersViaEngagementDrop" classname="com.example.blankapp.engine.LifeEngineTest" time="0.001"/>
+  <testcase name="freshContactWithIdle_triggers" classname="com.example.blankapp.engine.LifeEngineTest" time="0.001"/>
+  <testcase name="loadWithNullContext_doesNotCrash" classname="com.example.blankapp.engine.LifeEngineTest" time="0.0"/>
+  <testcase name="persistWithNullContext_doesNotCrash" classname="com.example.blankapp.engine.LifeEngineTest" time="0.006"/>
+  <testcase name="initialStateIsIdle" classname="com.example.blankapp.engine.LifeEngineTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.blankapp.client.TriggerDecisionTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-07-08T03:07:50" hostname="codespaces-f1e830" time="0.012">
+  <properties/>
+  <testcase name="parseEmptyInput" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.001"/>
+  <testcase name="parseNullInput" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.0"/>
+  <testcase name="parseStringNullTopicHint" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.002"/>
+  <testcase name="extractJsonObject_withNoise" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.002"/>
+  <testcase name="parseShouldSpeakFalse" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.0"/>
+  <testcase name="parseNoAction" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.0"/>
+  <testcase name="parseCleanJson" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.001"/>
+  <testcase name="parseLiteralNullTopicHint" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.0"/>
+  <testcase name="parseMarkdownFencedJson" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.003"/>
+  <testcase name="parseNoMarkdownCodeFence" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.0"/>
+  <testcase name="parseJsonWithLeadingNoise" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.0"/>
+  <testcase name="extractJsonObject_basic" classname="com.example.blankapp.client.TriggerDecisionTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

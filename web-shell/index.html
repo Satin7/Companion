@@ -62,7 +62,7 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
     <span>🔑 DeepSeek API Key:</span>
     <input id="api-key" type="password" placeholder="sk-...">
     <button onclick="saveApiKey()">保存</button>
-    <span style="font-size:11px;color:#856404">代理: localhost:8080 → api.deepseek.com</span>
+    <span style="font-size:11px;color:#856404">API: server.py 自动转发 → api.deepseek.com</span>
   </div>
   <div id="messages"></div>
   <div id="input-area">
@@ -78,6 +78,10 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
   <div class="section" id="state-emotion"></div>
   <div class="section" id="state-persona"></div>
   <div class="section" id="state-scheduler"></div>
+  <div class="section">
+    <h3>🧠 记忆</h3>
+    <div id="memory-display" class="dim" style="white-space:pre-wrap;max-height:120px;overflow-y:auto">(暂无记忆)</div>
+  </div>
   <div id="log-area"></div>
 </div>
 
@@ -85,7 +89,7 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
 // ═══════════════════════════════════════════════════════════════
 // DEEPSEEK CLIENT
 // ═══════════════════════════════════════════════════════════════
-const PROXY = 'http://localhost:8080';
+const PROXY = ''; // same-origin — server.py handles both pages + API proxy
 const DS = {
   async complete(messages, opts = {}) {
     const body = {
@@ -382,7 +386,7 @@ Respond ONLY with JSON: {"shouldSpeak":bool,"topicHint":"short Chinese topic or 
   },
 
   async generateMessage(topicHint, messages) {
-    const sys = `你是一个温暖、理性且有主动关心能力的AI伴侣。你需要主动发起一段简短的对话。语气自然、真诚，不要像机器人。不要用"我注意到"、"根据分析"这类机械的表达。像一个真正关心朋友的人那样说话。保持简短（2-4句话）。`;
+    const sys = `你是一个温暖、理性且有主动关心能力的AI伴侣。你需要主动发起一段简短的对话。语气自然、真诚，不要像机器人。不要用"我注意到"、"根据分析"这类机械的表达。像一个真正关心朋友的人那样说话。保持简短（2-4句话）。` + memoryContext();
     let ctx = '最近的对话：\n';
     for (const m of messages.slice(-8)) ctx += `${m.role==='user'?'用户':'AI'}: ${m.content}\n`;
     if (topicHint) ctx += `\n建议话题：${topicHint}\n`;
@@ -426,22 +430,22 @@ async function evaluatePostReply(messages) {
 }
 
 async function onTimerTick() {
-  const messages = getMessages();
-  if (!messages.length) return;
   if (!document.getElementById('api-key').value.trim()) return;
 
   LifeEngine.onTimerTick(Date.now());
   const lifeEvent = LifeEngine.checkForLifeSignal(Date.now());
   if (lifeEvent) {
     log('event', `🔔 LifeEvent: ${lifeEvent.reason} (idle=${lifeEvent.idleMinutes}min)`);
-    await evaluateAllTriggers(messages);
+    await EmotionEngine.analyze(getMessages());
+    await evaluateAllTriggers(getMessages(), lifeEvent);
   } else {
     updateDebug();
   }
 }
 
-async function evaluateAllTriggers(messages) {
-  const lifeEvent = LifeEngine.checkForLifeSignal(Date.now());
+async function evaluateAllTriggers(messages, lifeEventFromTimer) {
+  // Timer path passes the event to avoid double-consumption; post-reply path checks fresh
+  const lifeEvent = lifeEventFromTimer || LifeEngine.checkForLifeSignal(Date.now());
   const emotionEvent = EmotionEngine.checkForEmotionalSignal();
   if (emotionEvent) log('event', `🔔 EmotionEvent: ${emotionEvent.reason} urgency=${emotionEvent.urgency.toFixed(2)}`);
 
@@ -462,15 +466,96 @@ async function evaluateAllTriggers(messages) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// UI
+// PERSISTENCE
 // ═══════════════════════════════════════════════════════════════
 let chatMessages = [];
+let currentContact = 'default';
+
+function storageKey() {
+  return `companion_msgs_${currentContact}`;
+}
+
+function saveMessages() {
+  try {
+    localStorage.setItem(storageKey(), JSON.stringify(chatMessages.slice(-200)));
+  } catch(e) { /* quota exceeded, ignore */ }
+}
+
+function loadMessages() {
+  try {
+    const raw = localStorage.getItem(storageKey());
+    if (raw) chatMessages = JSON.parse(raw);
+  } catch(e) { chatMessages = []; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// COMPANION MEMORY
+// ═══════════════════════════════════════════════════════════════
+let userMemory = '';
+
+function memoryKey() {
+  return `companion_memory_${currentContact}`;
+}
+
+function loadMemory() {
+  try {
+    userMemory = localStorage.getItem(memoryKey()) || '';
+  } catch(e) { userMemory = ''; }
+}
+
+function saveMemory() {
+  try {
+    localStorage.setItem(memoryKey(), userMemory);
+  } catch(e) { /* ignore */ }
+}
+
+/**
+ * Use LLM to extract and update key facts about the user from recent conversation.
+ * Called periodically (not every message) to keep memory fresh.
+ */
+async function updateMemory(messages) {
+  if (messages.length < 2) return;
+  const current = userMemory;
+  const recent = messages.slice(-6).map(m => `${m.role==='user'?'用户':'AI'}: ${m.content.slice(0,300)}`).join('\n');
+
+  const sys = `你是一个记忆管理助手。根据最近的对话，更新你对用户的记忆摘要。
+现有记忆：
+${current || '(空)'}
+
+最近对话：
+${recent}
+
+请输出更新后的记忆摘要（纯文本，不超过200字）。保留重要的旧信息，加入新发现的事实、偏好、情绪状态、生活习惯等。只输出记忆内容，不要加说明。`;
+
+  try {
+    const reply = await DS.complete([
+      { role: 'system', content: sys },
+    ], { maxTokens: 300, label: 'memory-update' });
+    if (reply && reply.trim()) {
+      userMemory = reply.trim();
+      saveMemory();
+      log('info', `🧠 Memory updated (${userMemory.length} chars)`);
+      document.getElementById('memory-display').textContent = userMemory || '(暂无记忆)';
+    }
+  } catch(e) {
+    // Memory update is best-effort, silent on failure
+  }
+}
+
+function memoryContext() {
+  return userMemory ? `\n关于用户（供参考，无需逐条提及，自然融入对话中）：\n${userMemory}` : '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UI
+// ═══════════════════════════════════════════════════════════════
 
 function getMessages() { return chatMessages; }
 
 function addMessage(role, content, isProactive) {
-  const m = { role, content, timestamp: Date.now() };
+  const m = { role, content, timestamp: Date.now(), isProactive: !!isProactive };
   chatMessages.push(m);
+  saveMessages();
   const div = document.createElement('div');
   div.className = 'msg ' + (isProactive ? 'proactive' : role);
   div.innerHTML = `<div class="bubble">${escapeHtml(content)}<div class="meta">${fmtTime(m.timestamp)}</div></div>`;
@@ -489,14 +574,18 @@ async function send() {
   if (!apiKey) { addMessage('assistant', '⚠️ 请先设置 DeepSeek API Key'); return; }
 
   try {
+    const sysPrompt = '你是一个温暖、理性能干的AI伴侣。请简短地回复用户（2-4句话）。'
+      + memoryContext()
+      + '\n用户说：';
     const reply = await DS.complete([
-      { role: 'system', content: '你是一个温暖、理性能干的助手。请简短地回复用户。用户说：' },
+      { role: 'system', content: sysPrompt },
       { role: 'user', content: text },
     ], { maxTokens: 1024, reasoning: 'high', label: 'main-reply' });
     addMessage('assistant', reply);
 
-    // Post-reply proactive evaluation
+    // Post-reply proactive evaluation + memory update
     await evaluatePostReply(chatMessages);
+    updateMemory(chatMessages); // async, best-effort
     updateDebug();
   } catch (e) {
     addMessage('assistant', '❌ 错误: ' + e.message);
@@ -549,6 +638,24 @@ function escapeHtml(s) {
 
 // ── init ──
 document.getElementById('contact-select').onchange = function() {
+  // Save current before switching
+  saveMessages();
+  saveMemory();
+  // Switch
+  currentContact = this.value;
+  loadMessages();
+  loadMemory();
+  document.getElementById('memory-display').textContent = userMemory || '(暂无记忆)';
+  // Re-render
+  const container = document.getElementById('messages');
+  container.innerHTML = '';
+  for (const m of chatMessages) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + (m.isProactive ? 'proactive' : m.role);
+    div.innerHTML = `<div class="bubble">${escapeHtml(m.content)}<div class="meta">${fmtTime(m.timestamp)}</div></div>`;
+    container.appendChild(div);
+  }
+
   const isTest = this.value === 'test';
   if (isTest) {
     enableTestMode();
@@ -562,18 +669,34 @@ document.getElementById('contact-select').onchange = function() {
   LifeEngine.reset();
   EmotionEngine.reset();
   Persona.reset();
+  updateDebug();
 };
 
 // Restore API key
-const saved = localStorage.getItem('ds_api_key');
-if (saved) document.getElementById('api-key').value = saved;
+const savedKey = localStorage.getItem('ds_api_key');
+if (savedKey) document.getElementById('api-key').value = savedKey;
+
+// Load persisted data
+loadMessages();
+loadMemory();
+document.getElementById('memory-display').textContent = userMemory || '(暂无记忆)';
+// Re-render saved messages
+(function() {
+  const container = document.getElementById('messages');
+  for (const m of chatMessages) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + (m.isProactive ? 'proactive' : m.role);
+    div.innerHTML = `<div class="bubble">${escapeHtml(m.content)}<div class="meta">${fmtTime(m.timestamp)}</div></div>`;
+    container.appendChild(div);
+  }
+})();
 
 // Start
 startScheduler();
 updateDebug();
 setInterval(updateDebug, 5000);
 log('info', '🚀 Companion Web Shell ready');
-log('info', '先运行代理: python3 proxy.py，然后设置API Key即可使用');
+log('info', '运行: python3 server.py，然后浏览器打开 http://localhost:8080');
 log('info', '切换到 🧪 测试联系人，发一条消息后等待主动消息');
 </script>
 </body>

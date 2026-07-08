@@ -1,6 +1,7 @@
 package com.example.blankapp.orchestration;
 
 import android.content.Context;
+import android.util.Log;
 
 import com.example.blankapp.ChatMessage;
 import com.example.blankapp.client.DeepSeekClient;
@@ -30,6 +31,8 @@ import java.util.List;
  * - onTimerTick(): called periodically by TriggerScheduler
  */
 public class ProactiveOrchestrator {
+
+    private static final String TAG = "ProactiveOrch";
 
     private final String contactId;
     private final DeepSeekClient llmClient;
@@ -104,19 +107,23 @@ public class ProactiveOrchestrator {
     // ── lifecycle ───────────────────────────────────────────────
 
     public void start() {
+        Log.i(TAG, "start() called for contact=" + contactId);
         scheduler.start();
     }
 
     public void pause() {
+        Log.i(TAG, "pause() called for contact=" + contactId);
         scheduler.pause();
         persistAll();
     }
 
     public void resume() {
+        Log.i(TAG, "resume() called for contact=" + contactId);
         scheduler.resume();
     }
 
     public void stop() {
+        Log.i(TAG, "stop() called for contact=" + contactId);
         scheduler.stop();
         persistAll();
     }
@@ -134,6 +141,7 @@ public class ProactiveOrchestrator {
      */
     public void evaluatePostReply(String apiKey, List<ChatMessage> messages,
                                    String userMessage, Callback callback) {
+        Log.d(TAG, "evaluatePostReply: userMessage='" + userMessage + "'");
         this.cachedMessages = messages;
 
         // Feed lifecycle signal
@@ -142,6 +150,7 @@ public class ProactiveOrchestrator {
 
         // Analyse emotions from recent messages (async)
         emotionEngine.analyzeMessages(apiKey, messages, () -> {
+            Log.d(TAG, "evaluatePostReply: emotion analysis complete, evaluating triggers");
             // After analysis completes, evaluate all triggers
             evaluateAllTriggers(apiKey, messages, callback);
         });
@@ -150,30 +159,50 @@ public class ProactiveOrchestrator {
     // ── entry point 2: timer tick ───────────────────────────────
 
     private void onTimerTick() {
-        if (cachedMessages == null || cachedMessages.isEmpty()) return;
-        if (apiKey == null || apiKey.isEmpty()) return;
+        if (apiKey == null || apiKey.isEmpty()) {
+            Log.w(TAG, "onTimerTick: apiKey not set, skipping");
+            return;
+        }
 
         long now = System.currentTimeMillis();
         lifeEngine.onTimerTick(now);
 
         LifeEngineEvent lifeEvent = lifeEngine.checkForLifeSignal(now);
-        if (lifeEvent == null) {
+        // Also check EmotionEngine — it may have a signal even if LifeEngine is quiet
+        EmotionEngineEvent emotionEvent = emotionEngine.checkForEmotionalSignal();
+        // Use empty list for fresh contacts with no messages yet
+        List<ChatMessage> msgs = cachedMessages != null ? cachedMessages : new ArrayList<>();
+
+        // Bail only when BOTH engines are silent
+        if (lifeEvent == null && emotionEvent == null) {
+            Log.v(TAG, "onTimerTick: both engines silent, stretching interval");
             scheduler.suggestStretch();
             return;
         }
 
-        // Feed the life event into the full pipeline
-        EmotionEngineEvent emotionEvent = emotionEngine.checkForEmotionalSignal();
+        if (lifeEvent != null) {
+            Log.i(TAG, "onTimerTick: LifeEngine fired — reason=" + lifeEvent.reason
+                    + ", confidence=" + lifeEvent.confidence
+                    + ", idleMinutes=" + lifeEvent.idleMinutes);
+        }
+        if (emotionEvent != null) {
+            Log.i(TAG, "onTimerTick: EmotionEngine fired — reason=" + emotionEvent.reason
+                    + ", urgency=" + emotionEvent.urgency);
+        }
 
-        decisionClient.decide(apiKey, cachedMessages, lifeEvent, emotionEvent,
+        // Feed whichever engine(s) fired into the LLM decision pipeline
+        decisionClient.decide(apiKey, msgs, lifeEvent, emotionEvent,
                 personaManager.current(),
                 decision -> {
                     if (decision.shouldSpeak) {
+                        Log.i(TAG, "onTimerTick: LLM decided to speak, topicHint="
+                                + decision.topicHint + ", confidence=" + decision.confidence);
                         decisionClient.generateMessage(apiKey, decision.topicHint,
-                                cachedMessages, personaManager.current(),
+                                msgs, personaManager.current(),
                                 new DeepSeekClient.Callback() {
                                     @Override
                                     public void onSuccess(String reply) {
+                                        Log.i(TAG, "onTimerTick: proactive message generated successfully");
                                         personaManager.evolveMood(0.2f);
                                         personaManager.persist(contactId);
                                         persistAll();
@@ -184,11 +213,15 @@ public class ProactiveOrchestrator {
 
                                     @Override
                                     public void onError(String error) {
+                                        Log.e(TAG, "onTimerTick: generateMessage failed: " + error);
                                         if (defaultCallback != null) {
                                             defaultCallback.onError(error);
                                         }
                                     }
                                 });
+                    } else {
+                        Log.i(TAG, "onTimerTick: LLM decided NOT to speak, stretching interval");
+                        scheduler.suggestStretch();
                     }
                 });
     }
@@ -203,25 +236,36 @@ public class ProactiveOrchestrator {
         EmotionEngineEvent emotionEvent = emotionEngine.checkForEmotionalSignal();
 
         if (lifeEvent == null && emotionEvent == null) {
+            Log.v(TAG, "evaluateAllTriggers: both engines silent, no action");
             scheduler.suggestStretch();
             callback.onNoAction();
             return;
+        }
+
+        if (lifeEvent != null) {
+            Log.i(TAG, "evaluateAllTriggers: LifeEngine — reason=" + lifeEvent.reason);
+        }
+        if (emotionEvent != null) {
+            Log.i(TAG, "evaluateAllTriggers: EmotionEngine — reason=" + emotionEvent.reason);
         }
 
         decisionClient.decide(apiKey, messages, lifeEvent, emotionEvent,
                 personaManager.current(),
                 decision -> {
                     if (!decision.shouldSpeak) {
+                        Log.i(TAG, "evaluateAllTriggers: LLM decided NOT to speak");
                         callback.onNoAction();
                         return;
                     }
 
+                    Log.i(TAG, "evaluateAllTriggers: LLM decided to speak, generating message");
                     // Generate the actual proactive message
                     decisionClient.generateMessage(apiKey, decision.topicHint,
                             messages, personaManager.current(),
                             new DeepSeekClient.Callback() {
                                 @Override
                                 public void onSuccess(String reply) {
+                                    Log.i(TAG, "evaluateAllTriggers: proactive message generated");
                                     // Evolve persona state based on proactive interaction
                                     personaManager.evolveEnergy(false, 0);
                                     if (emotionEvent != null) {
@@ -236,6 +280,7 @@ public class ProactiveOrchestrator {
 
                                 @Override
                                 public void onError(String error) {
+                                    Log.e(TAG, "evaluateAllTriggers: generateMessage failed: " + error);
                                     callback.onError(error);
                                 }
                             });

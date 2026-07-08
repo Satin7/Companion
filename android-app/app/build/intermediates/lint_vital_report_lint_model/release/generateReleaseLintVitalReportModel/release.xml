@@ -23,7 +23,7 @@
   <artifact
       classOutputs="build/intermediates/javac/release/classes:build/intermediates/compile_and_runtime_not_namespaced_r_class_jar/release/R.jar"
       type="MAIN"
-      applicationId="com.example.blankapp"
+      applicationId="com.companion.mobile"
       generatedSourceFolders="build/generated/ap_generated_sources/release/out"
       generatedResourceFolders="build/generated/res/resValues/release"
       desugaredMethodsFiles="/home/codespace/.gradle/caches/transforms-4/fb282d5150a60f5c92f9d10bde1eefea/transformed/D8BackportedDesugaredMethods.txt">
