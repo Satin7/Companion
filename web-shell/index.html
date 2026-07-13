@@ -59,8 +59,8 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
     </select>
     <span style="font-size:12px;margin-left:8px">模式:</span>
     <select id="mode-toggle" onchange="onModeToggle()">
-      <option value="PRESENT">PRESENT (强互动)</option>
       <option value="ABSENT">ABSENT (弱互动)</option>
+      <option value="PRESENT">PRESENT (强互动)</option>
     </select>
   </div>
   <div id="api-key-area">
@@ -79,6 +79,7 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
 <!-- ═══════════ DEBUG PANEL ═══════════ -->
 <div id="debug-panel">
   <h2>🔍 调试面板</h2>
+  <div class="section" id="state-decision" style="background:#252536"></div>
   <div class="section" id="state-life"></div>
   <div class="section" id="state-emotion"></div>
   <div class="section" id="state-persona"></div>
@@ -94,7 +95,6 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
 // ═══════════════════════════════════════════════════════════════
 // DEEPSEEK CLIENT
 // ═══════════════════════════════════════════════════════════════
-const PROXY = ''; // same-origin — server.py handles both pages + API proxy
 const DS = {
   async complete(messages, opts = {}) {
     const body = {
@@ -110,7 +110,7 @@ const DS = {
     const apiKey = document.getElementById('api-key').value.trim();
     if (!apiKey) throw new Error('请先设置 API Key');
     log('api', `→ POST /chat/completions (${opts.label || ''})`);
-    const resp = await fetch(PROXY + '/chat/completions', {
+    const resp = await fetch('/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
       body: JSON.stringify(body),
@@ -160,7 +160,7 @@ class TriggerDecision {
 // ═══════════════════════════════════════════════════════════════
 const LifeEngine = {
   state: 'IDLE',            // IDLE | OBSERVING | READY
-  interactionMode: 'PRESENT', // PRESENT | ABSENT
+  interactionMode: 'ABSENT', // PRESENT | ABSENT
   lastInteraction: Date.now(),
   lastProactiveSent: 0,     // timestamp of last proactive message Companion sent
   consecutiveNoReply: 0,    // how many proactive messages without user reply
@@ -169,10 +169,14 @@ const LifeEngine = {
   activeHours: new Set(),
   histAvg: 10,
   lastUserMsgSignal: null,  // { intensity, depth, needCare }
+  initialGreetingSent: false,
+  morningCheckSentDate: '',
+  lastLifeSignalMs: 0,
+  lifeSignalCooldownMs: 30 * 60 * 1000,
 
   reset() {
     this.state = 'IDLE';
-    this.interactionMode = 'PRESENT';
+    this.interactionMode = 'ABSENT';
     this.lastInteraction = Date.now();
     this.lastProactiveSent = 0;
     this.consecutiveNoReply = 0;
@@ -180,6 +184,17 @@ const LifeEngine = {
     this.activeHours.clear();
     this.histAvg = 10;
     this.lastUserMsgSignal = null;
+    this.initialGreetingSent = false;
+    this.morningCheckSentDate = '';
+    this.lastLifeSignalMs = 0;
+  },
+
+  _todayKey(now) {
+    const d = new Date(now);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   },
 
   // ── drive source 1: time ──
@@ -188,8 +203,12 @@ const LifeEngine = {
     if (this.state === 'READY') return;
     const idleMs = now - this.lastInteraction;
     const inWindow = this.activeHours.size === 0 || this.activeHours.has(new Date(now).getHours());
-    const morning = new Date(now).getHours() >= 10 && this.interactionCount === 0;
-    const initial = this.interactionCount === 0 && idleMs > this.idleThresholdMs;
+    const today = this._todayKey(now);
+    const morning =
+      new Date(now).getHours() >= 10 &&
+      this.interactionCount === 0 &&
+      this.morningCheckSentDate !== today;
+    const initial = !this.initialGreetingSent && this.interactionCount === 0 && idleMs > this.idleThresholdMs;
 
     if (morning) {
       this.state = 'READY';
@@ -247,16 +266,22 @@ const LifeEngine = {
   checkForLifeSignal(now) {
     // Mode is user-controlled (manual switch), no auto-evaluation
     if (this.state !== 'READY') return null;
+    if (this.lastLifeSignalMs > 0 && now - this.lastLifeSignalMs < this.lifeSignalCooldownMs) {
+      return null;
+    }
     const idleMin = Math.floor((now - this.lastInteraction) / 60000);
     let reason, hint;
     if (this.interactionCount === 0 && idleMin > 0) {
       reason = 'INITIAL_GREETING'; hint = '全新联系人，发起首次问候';
+      this.initialGreetingSent = true;
     } else if (this.interactionCount === 0 && new Date(now).getHours() >= 10) {
       reason = 'MORNING_CHECK_IN'; hint = '用户今天还没有聊天';
+      this.morningCheckSentDate = this._todayKey(now);
     } else {
       reason = 'PROLONGED_IDLE'; hint = `用户空闲 ${idleMin} 分钟`;
     }
     this.state = 'OBSERVING';
+    this.lastLifeSignalMs = now;
     return new LifeEngineEvent(reason, Math.min(0.95, idleMin / 480), hint, idleMin,
       this.lastUserMsgSignal ? { ...this.lastUserMsgSignal } : null);
   },
@@ -502,36 +527,49 @@ const DecisionClient = {
       emotionEvent: emotionEvent ? { reason: emotionEvent.reason, urgency: emotionEvent.urgency, valence: emotionEvent.snapshot.valence, arousal: emotionEvent.snapshot.arousal } : null,
     };
 
-    const sys = `You are a proactive companion decision engine.
-Interaction mode: ${interactionMode}. Companion strategy: ${strategy}.
-Desire level: ${desireLevel.toFixed(2)}. No-reply count: ${LifeEngine.consecutiveNoReply}.
-
-Guidelines:
-PRESENT strategies (user is actively chatting):
-- follow_up_care: user hinted at distress → offer warm, caring follow-up
-- follow_up_deepen: conversation is deep/engaged → ask a thoughtful question to continue
-- follow_up_light: natural, light continuation of the topic
-- Only speak if it feels like natural conversation flow, not forced
-
-ABSENT strategies (user may or may not reply):
-- check_in: user seems distressed/silent → gently ask if they're okay
-- reduce_frequency: give space, speak less often
-- keep_company: user hasn't replied to several messages, keep sharing warmth
-
-MORNING_CHECK_IN and INITIAL_GREETING are strong signals — speak warmly.
-Respond ONLY with JSON: {"shouldSpeak":bool,"topicHint":"short Chinese topic or null","confidence":0.0-1.0}`;
-
     try {
-      const reply = await DS.complete([
-        { role: 'system', content: sys },
-        { role: 'user', content: JSON.stringify(ctx) },
-      ], { maxTokens: 256, label: 'trigger-decision' });
-      const cleaned = reply.replace(/```[a-z]*\s*/g, '').trim();
-      const j = JSON.parse(cleaned.slice(cleaned.indexOf('{'), cleaned.lastIndexOf('}') + 1));
-      log('decision', `→ shouldSpeak=${j.shouldSpeak} hint="${j.topicHint}" conf=${j.confidence}`);
-      return new TriggerDecision(!!j.shouldSpeak, j.topicHint === 'null' || !j.topicHint ? null : j.topicHint, parseFloat(j.confidence) || 0);
+      const apiKey = document.getElementById('api-key').value.trim();
+      const nowMs = Date.now();
+      const payload = {
+        user_id: 'web-default',
+        interaction_mode: interactionMode,
+        desire_level: parseFloat(desireLevel),
+        consecutive_no_reply: LifeEngine.consecutiveNoReply,
+        test_mode: !!testMode,
+        now_ts_ms: nowMs,
+        last_proactive_sent_ms: LifeEngine.lastProactiveSent,
+        messages: messages.slice(-8).map(m => ({ role: m.role, content: m.content })),
+        life_event: lifeEvent ? {
+          reason: lifeEvent.reason,
+          idle_minutes: lifeEvent.idleMinutes,
+          context_hint: lifeEvent.contextHint,
+          user_msg_signal: lifeEvent.userMsgSignal || null,
+        } : null,
+        emotion_event: emotionEvent ? {
+          reason: emotionEvent.reason,
+          urgency: emotionEvent.urgency,
+          valence: emotionEvent.snapshot.valence,
+          arousal: emotionEvent.snapshot.arousal,
+        } : null,
+      };
+
+      const resp = await fetch('/core/proactive/decision', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': apiKey ? ('Bearer ' + apiKey) : '',
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+      const j = await resp.json();
+      log('decision', `core → shouldSpeak=${j.should_speak} strategy=${j.strategy} conf=${j.confidence}`);
+      return new TriggerDecision(!!j.should_speak, j.topic_hint || null, parseFloat(j.confidence) || 0);
     } catch (e) {
-      log('error', `Decision parse failed: ${e.message}`);
+      log('error', `Core decision failed, fallback local: ${e.message}`);
+      const nowMs = Date.now();
+      const testDue = testMode && (nowMs - LifeEngine.lastProactiveSent >= TEST_PROACTIVE_INTERVAL_MS);
+      if (testDue) return new TriggerDecision(true, '测试模式问候', 1.0);
       return lifeEvent || emotionEvent ? new TriggerDecision(true, null, 0.3) : TriggerDecision.noAction();
     }
   },
@@ -578,8 +616,10 @@ const LONG_WAVE_MS  = 90 * 60 * 1000;   // 90 min
 const MIN_CHECK_MS  = 15 * 1000;         // min 15s between checks
 const MAX_CHECK_MS  = 20 * 60 * 1000;    // max 20min between checks
 const T50_MS        = 2 * 60 * 60 * 1000; // idle time for P=0.5
+const TEST_PROACTIVE_INTERVAL_MS = 60 * 1000; // deterministic 1 minute in test mode
 
 let schedulerId = null;
+let schedulerRunning = false;
 let testMode = false;
 
 /** Attention probability: how likely Companion is "thinking of" the user right now. */
@@ -618,13 +658,14 @@ function computeNextDelay(idleMs, mode, emotionUrgency) {
 
   // In test mode, compress to 10s-2min range
   if (testMode) {
-    return Math.max(10_000, Math.min(120_000, delay / 10));
+    // Keep frequent checks so the 1-minute deterministic send can fire on time.
+    return 10_000;
   }
   return Math.max(MIN_CHECK_MS, Math.min(MAX_CHECK_MS, delay));
 }
 
 function scheduleNextCheck() {
-  if (!schedulerId) return;
+  if (!schedulerRunning) return;
   const now = Date.now();
   const idleMs = now - LifeEngine.lastInteraction;
   const mode = LifeEngine.interactionMode;
@@ -636,27 +677,28 @@ function scheduleNextCheck() {
 }
 
 function startScheduler() {
-  if (schedulerId) return;
+  if (schedulerRunning) return;
+  schedulerRunning = true;
   log('info', '🧠 AttentionScheduler started');
   scheduleNextCheck();
 }
 
 function stopScheduler() {
-  if (!schedulerId) return;
-  clearTimeout(schedulerId);
-  schedulerId = null;
+  schedulerRunning = false;
+  if (schedulerId) { clearTimeout(schedulerId); schedulerId = null; }
 }
 
 async function onAttentionTick() {
-  schedulerId = null; // clear so we can re-schedule
+  schedulerId = null;
   await onTimerTick();
-  if (schedulerId === null) scheduleNextCheck(); // only if not stopped
+  scheduleNextCheck(); // schedulerRunning guard inside
 }
 
 function enableTestMode() {
   LifeEngine.idleThresholdMs = 60_000;
+  LifeEngine.lastProactiveSent = Date.now();
   testMode = true;
-  if (schedulerId) { stopScheduler(); startScheduler(); }
+  if (schedulerRunning) { stopScheduler(); startScheduler(); }
   log('event', '🧪 TEST MODE: idleThreshold=1min, attention intervals compressed');
 }
 
@@ -681,7 +723,8 @@ async function evaluatePostReply(userText, messages) {
 }
 
 async function onTimerTick() {
-  if (!document.getElementById('api-key').value.trim()) return;
+  const hasApiKey = !!document.getElementById('api-key').value.trim();
+  if (!hasApiKey && !testMode) return;
 
   const now = Date.now();
   LifeEngine.onTimerTick(now);
@@ -696,30 +739,70 @@ async function onTimerTick() {
     log('event', `🔔 LifeEvent: ${lifeEvent.reason} mode=${LifeEngine.interactionMode} desire=${EmotionState.desireLevel.toFixed(2)} (idle=${lifeEvent.idleMinutes}min)`);
     await EmotionEngine.analyze(getMessages());
     await evaluateAllTriggers(getMessages(), lifeEvent);
+  } else if (testMode) {
+    // Test mode checks every tick; core enforces deterministic 1-minute cadence.
+    await evaluateAllTriggers(getMessages(), null);
   } else {
     updateDebug();
   }
 }
 
+let lastSnapshot = null;
+
 async function evaluateAllTriggers(messages, lifeEventFromTimer) {
-  const lifeEvent = lifeEventFromTimer || LifeEngine.checkForLifeSignal(Date.now());
+  const now = Date.now();
+  const lifeEvent = lifeEventFromTimer || LifeEngine.checkForLifeSignal(now);
   const emotionEvent = EmotionEngine.checkForEmotionalSignal();
   if (emotionEvent) log('event', `💭 EmotionEvent: ${emotionEvent.reason} urgency=${emotionEvent.urgency.toFixed(2)}`);
 
-  const decision = await DecisionClient.decide(messages, lifeEvent, emotionEvent);
-  log('decision', `→ ${decision.shouldSpeak?'SPEAK':'SILENT'} mode=${LifeEngine.interactionMode} desire=${EmotionState.desireLevel.toFixed(2)} strategy=${LifeEngine.interactionMode==='ABSENT'?'check_in/reduce/company':'N/A'}`);
-  if (!decision.shouldSpeak) { updateDebug(); return; }
+  const idleMs = now - LifeEngine.lastInteraction;
+  const attentionP = attentionProbability(idleMs, LifeEngine.interactionMode, emotionEvent?.urgency || 0);
 
-  try {
-    const msg = await DecisionClient.generateMessage(decision.topicHint, messages);
-    addMessage('assistant', '[主动关心] ' + msg, true);
-    LifeEngine.onProactiveSent(Date.now());
-    EmotionState.satisfyDesire();
-    Persona.mood = Math.min(1, Persona.mood + 0.05);
-    log('event', `✅ Proactive sent (noReply=${LifeEngine.consecutiveNoReply})`);
-  } catch (e) {
-    log('error', `Generate failed: ${e.message}`);
+  const decision = await DecisionClient.decide(messages, lifeEvent, emotionEvent);
+  log('decision', `→ ${decision.shouldSpeak?'SPEAK':'SILENT'} mode=${LifeEngine.interactionMode} desire=${EmotionState.desireLevel.toFixed(2)}`);
+
+  let result = null;
+  if (decision.shouldSpeak) {
+    try {
+      let msg;
+      const hasApiKey = !!document.getElementById('api-key').value.trim();
+      if (testMode && !hasApiKey) {
+        msg = '这是测试模式的主动消息：每 1 分钟触发一次。你可以填写 API Key 来改为 LLM 生成内容。';
+      } else {
+        msg = await DecisionClient.generateMessage(decision.topicHint, messages);
+      }
+      addMessage('assistant', '[主动关心] ' + msg, true);
+      LifeEngine.onProactiveSent(Date.now());
+      EmotionState.satisfyDesire();
+      Persona.mood = Math.min(1, Persona.mood + 0.05);
+      log('event', `✅ Proactive sent (noReply=${LifeEngine.consecutiveNoReply})`);
+      result = { sent: true, msg: msg.slice(0, 80) };
+    } catch (e) {
+      log('error', `Generate failed: ${e.message}`);
+      result = { sent: false, error: e.message };
+    }
   }
+
+  // Capture snapshot for debug panel
+  lastSnapshot = {
+    time: fmtTime(now),
+    mode: LifeEngine.interactionMode,
+    desire: EmotionState.desireLevel.toFixed(2),
+    attentionP: (attentionP * 100).toFixed(1),
+    lifeReason: lifeEvent ? lifeEvent.reason : '--',
+    idleMin: lifeEvent ? lifeEvent.idleMinutes : Math.floor(idleMs / 60000),
+    emotionReason: emotionEvent ? emotionEvent.reason : '--',
+    emotionUrgency: emotionEvent ? emotionEvent.urgency.toFixed(2) : '--',
+    userNeedCare: lifeEvent?.userMsgSignal?.needCare?.toFixed(2) || '--',
+    strategy: LifeEngine.interactionMode === 'PRESENT'
+      ? (lifeEvent?.userMsgSignal?.needCare > 0.2 ? 'follow_up_care' : 'follow_up_light')
+      : 'reduce_frequency',
+    shouldSpeak: decision.shouldSpeak,
+    topicHint: decision.topicHint || '--',
+    confidence: decision.confidence.toFixed(2),
+    result,
+  };
+
   updateDebug();
 }
 
@@ -728,80 +811,81 @@ async function evaluateAllTriggers(messages, lifeEventFromTimer) {
 // ═══════════════════════════════════════════════════════════════
 let chatMessages = [];
 let currentContact = 'default';
+const CORE_USER_ID = 'web-default';
 
-function storageKey() {
-  return `companion_msgs_${currentContact}`;
+function coreHeaders() {
+  const apiKey = document.getElementById('api-key').value.trim();
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
+  return headers;
 }
 
-function saveMessages() {
-  try {
-    localStorage.setItem(storageKey(), JSON.stringify(chatMessages.slice(-200)));
-  } catch(e) { /* quota exceeded, ignore */ }
-}
-
-function loadMessages() {
-  try {
-    const raw = localStorage.getItem(storageKey());
-    if (raw) chatMessages = JSON.parse(raw);
-  } catch(e) { chatMessages = []; }
+function renderMessages() {
+  const container = document.getElementById('messages');
+  container.innerHTML = '';
+  for (const m of chatMessages) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + (m.isProactive ? 'proactive' : m.role);
+    div.innerHTML = `<div class="bubble">${escapeHtml(m.content)}<div class="meta">${fmtTime(m.timestamp || Date.now())}</div></div>`;
+    container.appendChild(div);
+  }
+  container.scrollTop = container.scrollHeight;
 }
 
 // ═══════════════════════════════════════════════════════════════
-// COMPANION MEMORY
+// COMPANION MEMORY — journal-style structured memory
 // ═══════════════════════════════════════════════════════════════
-let userMemory = '';
+let userMemory = {
+  summary: '',       // 整体画像：用户是什么样的人，近况如何
+  timeline: [],      // [{date: "07-08", topic: "聊了工作压力", notes: "..."}]
+  facts: [],         // ["在互联网公司做设计", "养了一只猫叫咪咪"]
+  patterns: '',      // 观察到的模式和规律
+  updated: 0,
+};
 
-function memoryKey() {
-  return `companion_memory_${currentContact}`;
-}
-
-function loadMemory() {
+async function syncConversationFromCore() {
   try {
-    userMemory = localStorage.getItem(memoryKey()) || '';
-  } catch(e) { userMemory = ''; }
-}
-
-function saveMemory() {
-  try {
-    localStorage.setItem(memoryKey(), userMemory);
-  } catch(e) { /* ignore */ }
-}
-
-/**
- * Use LLM to extract and update key facts about the user from recent conversation.
- * Called periodically (not every message) to keep memory fresh.
- */
-async function updateMemory(messages) {
-  if (messages.length < 2) return;
-  const current = userMemory;
-  const recent = messages.slice(-6).map(m => `${m.role==='user'?'用户':'AI'}: ${m.content.slice(0,300)}`).join('\n');
-
-  const sys = `你是一个记忆管理助手。根据最近的对话，更新你对用户的记忆摘要。
-现有记忆：
-${current || '(空)'}
-
-最近对话：
-${recent}
-
-请输出更新后的记忆摘要（纯文本，不超过200字）。保留重要的旧信息，加入新发现的事实、偏好、情绪状态、生活习惯等。只输出记忆内容，不要加说明。`;
-
-  try {
-    const reply = await DS.complete([
-      { role: 'system', content: sys },
-    ], { maxTokens: 300, label: 'memory-update' });
-    if (reply && reply.trim()) {
-      userMemory = reply.trim();
-      saveMemory();
-      log('info', `🧠 Memory updated (${userMemory.length} chars)`);
-      document.getElementById('memory-display').textContent = userMemory || '(暂无记忆)';
-    }
-  } catch(e) {
-    // Memory update is best-effort, silent on failure
+    const resp = await fetch('/core/chat/history', {
+      method: 'POST',
+      headers: coreHeaders(),
+      body: JSON.stringify({ user_id: CORE_USER_ID, contact_id: currentContact, limit: 500 }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    const data = await resp.json();
+    chatMessages = (data.messages || []).map(m => ({
+      role: m.role,
+      content: m.content,
+      timestamp: Date.now(),
+      isProactive: typeof m.content === 'string' && m.content.startsWith('[主动关心] '),
+    }));
+    userMemory = Object.assign({summary:'',timeline:[],facts:[],patterns:'',updated:0}, data.memory || {});
+    renderMessages();
+    document.getElementById('memory-display').textContent = memoryDisplayText();
+    log('info', `已同步历史: ${chatMessages.length} 条`);
+  } catch (e) {
+    log('error', `历史同步失败: ${e.message}`);
   }
 }
 
 function memoryContext() {
-  return userMemory ? `\n关于用户（供参考，无需逐条提及，自然融入对话中）：\n${userMemory}` : '';
+  const parts = [];
+  if (userMemory.summary) parts.push(userMemory.summary);
+  if (userMemory.facts.length) parts.push('已知: ' + userMemory.facts.join('；'));
+  if (userMemory.patterns) parts.push(userMemory.patterns);
+  if (userMemory.timeline.length) {
+    const recent = userMemory.timeline.slice(-5).map(t => `${t.date}: ${t.topic}`).join('; ');
+    parts.push('近况: ' + recent);
+  }
+  return parts.length ? `\n关于用户（融入对话，勿逐条复述）：\n${parts.join('\n')}` : '';
+}
+
+function memoryDisplayText() {
+  const lines = [];
+  if (userMemory.summary) lines.push(userMemory.summary);
+  if (userMemory.facts.length) lines.push('--- 关键信息 ---\n' + userMemory.facts.map(f => '• ' + f).join('\n'));
+  if (userMemory.timeline.length) lines.push('--- 时间线 ---\n' + userMemory.timeline.map(t => `${t.date} ${t.topic}`).join('\n'));
+  if (userMemory.patterns) lines.push('--- 模式 ---\n' + userMemory.patterns);
+  return lines.length ? lines.join('\n\n') : '(暂无记忆)';
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -813,7 +897,6 @@ function getMessages() { return chatMessages; }
 function addMessage(role, content, isProactive) {
   const m = { role, content, timestamp: Date.now(), isProactive: !!isProactive };
   chatMessages.push(m);
-  saveMessages();
   const div = document.createElement('div');
   div.className = 'msg ' + (isProactive ? 'proactive' : role);
   div.innerHTML = `<div class="bubble">${escapeHtml(content)}<div class="meta">${fmtTime(m.timestamp)}</div></div>`;
@@ -832,22 +915,36 @@ async function send() {
   if (!apiKey) { addMessage('assistant', '⚠️ 请先设置 DeepSeek API Key'); return; }
 
   try {
-    const sysPrompt = '你是一个温暖、理性能干的AI伴侣。请简短地回复用户（2-4句话）。'
-      + memoryContext()
-      + '\n用户说：';
-    const reply = await DS.complete([
-      { role: 'system', content: sysPrompt },
-      { role: 'user', content: text },
-    ], { maxTokens: 1024, reasoning: 'high', label: 'main-reply' });
-    addMessage('assistant', reply);
-
-    // Post-reply proactive evaluation + memory update
-    await evaluatePostReply(text, chatMessages);
-    updateMemory(chatMessages); // async, best-effort
-    updateDebug();
+    const resp = await fetch('/core/chat/reply', {
+      method: 'POST',
+      headers: coreHeaders(),
+      body: JSON.stringify({
+        user_id: CORE_USER_ID,
+        contact_id: currentContact,
+        message: text,
+        max_tokens: 1024,
+        update_memory: true,
+      }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    const data = await resp.json();
+    addMessage('assistant', data.reply || '');
+    if (data.memory) {
+      userMemory = Object.assign({summary:'',timeline:[],facts:[],patterns:'',updated:0}, data.memory);
+      document.getElementById('memory-display').textContent = memoryDisplayText();
+    }
   } catch (e) {
     addMessage('assistant', '❌ 错误: ' + e.message);
     log('error', `Send failed: ${e.message}`);
+    return;
+  }
+
+  // Post-reply proactive evaluation should not break the main chat UX.
+  try {
+    await evaluatePostReply(text, chatMessages);
+    updateDebug();
+  } catch (e) {
+    log('error', `Post-reply evaluation failed: ${e.message}`);
   }
 }
 
@@ -858,6 +955,23 @@ function saveApiKey() {
 }
 
 function updateDebug() {
+  // ── 决策快照 ──
+  const snap = lastSnapshot;
+  if (snap) {
+    const outcome = snap.shouldSpeak
+      ? (snap.result?.sent ? '<span class="val">✅ 已发送</span>' : '<span class="err">❌ 生成失败</span>')
+      : '<span class="dim">⏭ 跳过</span>';
+    document.getElementById('state-decision').innerHTML =
+      `<h3>📋 决策快照 <span class="dim">${snap.time}</span></h3>`
+      + `模式=<span class="val">${snap.mode}</span> 欲望=<span class="val">${snap.desire}</span> P(注意)=<span class="val">${snap.attentionP}%</span><br>`
+      + `LifeEvent=<span class="${snap.lifeReason!=='--'?'val':'dim'}">${snap.lifeReason}</span> (空闲${snap.idleMin}min) `
+      + `Emotion=<span class="${snap.emotionReason!=='--'?'warn':'dim'}">${snap.emotionReason}</span> `
+      + `needCare=<span class="dim">${snap.userNeedCare}</span><br>`
+      + `策略=<span class="dim">${snap.strategy}</span> `
+      + `LLM: <span class="${snap.shouldSpeak?'val':'dim'}">shouldSpeak=${snap.shouldSpeak}</span> `
+      + `hint=<span class="dim">${snap.topicHint}</span> conf=<span class="dim">${snap.confidence}</span><br>`
+      + `结果: ${outcome}`;
+  }
   const l = LifeEngine.status();
   const modeColor = l.mode === 'PRESENT' ? 'val' : 'warn';
   document.getElementById('state-life').innerHTML =
@@ -887,7 +1001,7 @@ function updateDebug() {
   const idleMs = Date.now() - LifeEngine.lastInteraction;
   const p = attentionProbability(idleMs, LifeEngine.interactionMode, EmotionEngine.checkForEmotionalSignal()?.urgency || 0);
   document.getElementById('state-scheduler').innerHTML =
-    `<h3>🧠 注意力调度</h3>P(想起)=<span class="val">${(p*100).toFixed(1)}%</span> 空闲=<span class="dim">${(idleMs/60000).toFixed(1)}min</span> 运行=<span class="${schedulerId?'val':'err'}">${!!schedulerId}</span>`;
+    `<h3>🧠 注意力调度</h3>P(想起)=<span class="val">${(p*100).toFixed(1)}%</span> 空闲=<span class="dim">${(idleMs/60000).toFixed(1)}min</span> 运行=<span class="${schedulerRunning?'val':'err'}">${schedulerRunning}</span>`;
 }
 
 function log(cat, msg) {
@@ -911,39 +1025,28 @@ function escapeHtml(s) {
 }
 
 // ── init ──
-document.getElementById('contact-select').onchange = function() {
-  // Save current before switching
-  saveMessages();
-  saveMemory();
+document.getElementById('contact-select').onchange = async function() {
   // Switch
   currentContact = this.value;
-  loadMessages();
-  loadMemory();
-  document.getElementById('memory-display').textContent = userMemory || '(暂无记忆)';
-  // Re-render
-  const container = document.getElementById('messages');
-  container.innerHTML = '';
-  for (const m of chatMessages) {
-    const div = document.createElement('div');
-    div.className = 'msg ' + (m.isProactive ? 'proactive' : m.role);
-    div.innerHTML = `<div class="bubble">${escapeHtml(m.content)}<div class="meta">${fmtTime(m.timestamp)}</div></div>`;
-    container.appendChild(div);
-  }
+  await syncConversationFromCore();
 
+  // Reset engines before applying mode-specific config so test timing baseline is correct.
+  LifeEngine.reset();
+  EmotionEngine.reset();
+  EmotionState.reset();
+  Persona.reset();
+
+  // Memory bootstrap will happen on first message send (when API key is available)
   const isTest = this.value === 'test';
   if (isTest) {
     enableTestMode();
     log('event', '🧪 切换到测试联系人 — 1分钟后将收到主动消息');
   } else {
     LifeEngine.idleThresholdMs = 2 * 60 * 60 * 1000;
-    schedulerInterval = 120_000;
+    testMode = false;
     if (schedulerId) { stopScheduler(); startScheduler(); }
     log('info', '切换到正常模式');
   }
-  LifeEngine.reset();
-  EmotionEngine.reset();
-  EmotionState.reset();
-  Persona.reset();
   updateDebug();
 };
 
@@ -951,20 +1054,10 @@ document.getElementById('contact-select').onchange = function() {
 const savedKey = localStorage.getItem('ds_api_key');
 if (savedKey) document.getElementById('api-key').value = savedKey;
 
-// Load persisted data
-loadMessages();
-loadMemory();
-document.getElementById('memory-display').textContent = userMemory || '(暂无记忆)';
-// Re-render saved messages
-(function() {
-  const container = document.getElementById('messages');
-  for (const m of chatMessages) {
-    const div = document.createElement('div');
-    div.className = 'msg ' + (m.isProactive ? 'proactive' : m.role);
-    div.innerHTML = `<div class="bubble">${escapeHtml(m.content)}<div class="meta">${fmtTime(m.timestamp)}</div></div>`;
-    container.appendChild(div);
-  }
-})();
+// Load conversation and memory from core server
+syncConversationFromCore();
+
+// Memory bootstraps on first message (when API key is available)
 
 // Start
 startScheduler();
