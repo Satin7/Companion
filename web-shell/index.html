@@ -45,6 +45,7 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
 #log-area .log.decision{color:#89b4fa}
 #log-area .log.api{color:#a6e3a1}
 #log-area .log.error{color:#f38ba8}
+.code-box{white-space:pre-wrap;max-height:180px;overflow-y:auto;background:#11111b;border:1px solid #313244;padding:8px;border-radius:6px;color:#cdd6f4}
 </style>
 </head>
 <body>
@@ -88,6 +89,22 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
     <h3>🧠 记忆</h3>
     <div id="memory-display" class="dim" style="white-space:pre-wrap;max-height:120px;overflow-y:auto">(暂无记忆)</div>
   </div>
+  <div class="section">
+    <h3>🗂 长期记忆</h3>
+    <div id="long-memory-display" class="code-box dim">(暂无)</div>
+  </div>
+  <div class="section">
+    <h3>📒 中期摘要</h3>
+    <div id="mid-memory-display" class="code-box dim">(暂无)</div>
+  </div>
+  <div class="section">
+    <h3>🧩 最终 Prompt（发给模型）</h3>
+    <div id="prompt-display" class="code-box dim">(暂无)</div>
+  </div>
+  <div class="section">
+    <h3>📤 主动消息发送给 DS</h3>
+    <div id="proactive-ds-display" class="code-box dim">(暂无)</div>
+  </div>
   <div id="log-area"></div>
 </div>
 
@@ -117,6 +134,14 @@ const DS = {
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
     const json = await resp.json();
+    if (opts.label === 'generate-proactive') {
+      lastProactiveDsRequest = {
+        at: Date.now(),
+        request: body,
+        response: json,
+      };
+      renderProactiveDsDisplay();
+    }
     return json.choices[0].message.content;
   },
 };
@@ -149,10 +174,12 @@ class EmotionEngineEvent {
 }
 
 class TriggerDecision {
-  constructor(speak, hint, conf) {
+  constructor(speak, hint, conf, strategy, followUpMode) {
     this.shouldSpeak = speak; this.topicHint = hint; this.confidence = conf;
+    this.strategy = strategy || 'reduce_frequency';
+    this.followUpMode = followUpMode || 'light';
   }
-  static noAction() { return new TriggerDecision(false, null, 0); }
+  static noAction(strategy, followUpMode) { return new TriggerDecision(false, null, 0, strategy, followUpMode); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -470,6 +497,29 @@ const Persona = {
   status() { return { energy: this.energy.toFixed(2), mood: this.mood.toFixed(2), motivation: this.motivation(), openness: this.openness.toFixed(2), resonance: this.emotionalResonance.toFixed(2) }; },
 };
 
+function followUpModeFromStrategy(strategy) {
+  return strategy === 'follow_up_deepen' || strategy === 'follow_up_care' ? 'deepen' : 'light';
+}
+
+function resolvePresentFollowUpPolicy(userMsgSignal, desireLevel) {
+  const signal = userMsgSignal || {};
+  const needCare = parseFloat(signal.needCare || 0) || 0;
+  const intensity = parseFloat(signal.intensity || 0) || 0;
+  const hasQuestion = !!signal.hasQuestion;
+
+  if (needCare > 0.2) {
+    return { mode: 'deepen', strategy: 'follow_up_care', threshold: 0.10, schedulerBias: 1.3 };
+  }
+  if (hasQuestion || intensity > 0.3 || desireLevel >= 0.45) {
+    return { mode: 'deepen', strategy: 'follow_up_deepen', threshold: 0.10, schedulerBias: 1.2 };
+  }
+  return { mode: 'light', strategy: 'follow_up_light', threshold: 0.15, schedulerBias: 1.0 };
+}
+
+function currentPresentFollowUpPolicy() {
+  return resolvePresentFollowUpPolicy(LifeEngine.lastUserMsgSignal, EmotionState.desireLevel);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // TRIGGER DECISION CLIENT
 // ═══════════════════════════════════════════════════════════════
@@ -478,28 +528,22 @@ const DecisionClient = {
     const interactionMode = LifeEngine.interactionMode;
     const desireLevel = EmotionState.desireLevel;
     const desireThreshold = 0.5;
+    const presentPolicy = interactionMode === 'PRESENT'
+      ? resolvePresentFollowUpPolicy(
+          (lifeEvent && lifeEvent.userMsgSignal) || LifeEngine.lastUserMsgSignal,
+          desireLevel,
+        )
+      : null;
 
     // Determine strategy based on mode
     let strategy = 'reduce_frequency';
+    let followUpMode = 'light';
     if (interactionMode === 'PRESENT') {
-      // PRESENT: user is here — easier to engage, natural conversation flow
-      const userNeedCare = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.needCare : 0;
-      const userIntensity = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.intensity : 0;
-      const userHasQuestion = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.hasQuestion : false;
-
-      // Lower threshold: in PRESENT, even small desire triggers (user is here, talk naturally)
-      const presentThreshold = 0.15;
-      if (desireLevel < presentThreshold) return TriggerDecision.noAction();
-
-      if (userNeedCare > 0.2) {
-        strategy = 'follow_up_care';
-      } else if (userIntensity > 0.3 || userHasQuestion) {
-        strategy = 'follow_up_deepen';
-      } else if (desireLevel > presentThreshold) {
-        strategy = 'follow_up_light';
-      } else {
-        return TriggerDecision.noAction();
+      followUpMode = presentPolicy.mode;
+      if (desireLevel < presentPolicy.threshold) {
+        return TriggerDecision.noAction('present_below_threshold', followUpMode);
       }
+      strategy = presentPolicy.strategy;
     } else {
       // ABSENT: check-in style — user may or may not reply
       const noReply = LifeEngine.consecutiveNoReply;
@@ -515,7 +559,13 @@ const DecisionClient = {
       }
     }
 
-    if (!lifeEvent && !emotionEvent && desireLevel < desireThreshold) return TriggerDecision.noAction();
+    if (interactionMode === 'PRESENT') {
+      if (!lifeEvent && !emotionEvent && desireLevel < presentPolicy.threshold) {
+        return TriggerDecision.noAction(strategy, followUpMode);
+      }
+    } else if (!lifeEvent && !emotionEvent && desireLevel < desireThreshold) {
+      return TriggerDecision.noAction(strategy, followUpMode);
+    }
 
     const ctx = {
       interactionMode,
@@ -564,27 +614,49 @@ const DecisionClient = {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
       const j = await resp.json();
       log('decision', `core → shouldSpeak=${j.should_speak} strategy=${j.strategy} conf=${j.confidence}`);
-      return new TriggerDecision(!!j.should_speak, j.topic_hint || null, parseFloat(j.confidence) || 0);
+      const finalStrategy = j.strategy || strategy;
+      return new TriggerDecision(
+        !!j.should_speak,
+        j.topic_hint || null,
+        parseFloat(j.confidence) || 0,
+        finalStrategy,
+        followUpModeFromStrategy(finalStrategy),
+      );
     } catch (e) {
       log('error', `Core decision failed, fallback local: ${e.message}`);
       const nowMs = Date.now();
       const testDue = testMode && (nowMs - LifeEngine.lastProactiveSent >= TEST_PROACTIVE_INTERVAL_MS);
-      if (testDue) return new TriggerDecision(true, '测试模式问候', 1.0);
-      return lifeEvent || emotionEvent ? new TriggerDecision(true, null, 0.3) : TriggerDecision.noAction();
+      if (testDue) return new TriggerDecision(true, '测试模式问候', 1.0, 'test_interval_1m', 'light');
+      return lifeEvent || emotionEvent
+        ? new TriggerDecision(true, null, 0.3, strategy, followUpModeFromStrategy(strategy))
+        : TriggerDecision.noAction(strategy, followUpMode);
     }
   },
 
-  async generateMessage(topicHint, messages) {
+  async generateMessage(decision, messages) {
     const mode = LifeEngine.interactionMode;
+    const topicHint = decision.topicHint;
+    const followUpMode = decision.followUpMode || 'light';
     let sys;
     if (mode === 'PRESENT') {
-      sys = `你正在和用户进行实时对话。用户就在旁边，你们在聊天。你需要主动承接话题或发起自然延续。
+      if (followUpMode === 'deepen') {
+        sys = `你正在和用户进行实时对话。用户就在旁边，你们在聊天。你需要主动承接话题，并顺着用户刚才的话往下推进半步。
 语气要求：
 - 像是在面对面聊天一样自然，承接刚才的话题
 - 可以用"对了"、"说起来"、"你刚才说..."这类自然的承接词
-- 可以追问细节、分享感受、或者提出新话题
-- 不要像在检查用户近况（那是留言模式才做的），要用在场聊天的语气
-- 保持简短（2-4句话）` + memoryContext();
+- 重点是深挖一个具体点：追一个细节、接一个情绪、或顺着他的问题往下问一句
+- 只推进半步，不要突然转新话题，也不要连发多个问题
+- 最多问一个具体问题，避免泛泛而谈
+- 保持简短（1-3句话）` + memoryContext();
+      } else {
+        sys = `你正在和用户进行实时对话。用户就在旁边，你们在聊天。你需要主动承接话题或发起自然延续。
+语气要求：
+- 像是在面对面聊天一样自然，承接刚才的话题
+- 可以用"对了"、"说起来"、"你刚才说..."这类自然的承接词
+- 轻轻接一句就够了，不要每次都深挖，也不要把一句话聊成盘问
+- 可以分享一个很短的联想，或者补一个轻微追问，但不要施加压力
+- 保持简短（1-2句话）` + memoryContext();
+      }
     } else {
       sys = `用户在不在场状态，可能回也可能不回你的消息。你需要主动关心或陪伴。
 语气要求：
@@ -596,6 +668,7 @@ const DecisionClient = {
     }
     let ctx = '最近的对话：\n';
     for (const m of messages.slice(-8)) ctx += `${m.role==='user'?'用户':'AI'}: ${m.content}\n`;
+    if (mode === 'PRESENT') ctx += `\nfollow-up 模式：${followUpMode}\n`;
     if (topicHint) ctx += `\n建议话题：${topicHint}\n`;
     ctx += '\n请生成一条主动发起的消息：';
     return await DS.complete([
@@ -623,7 +696,7 @@ let schedulerRunning = false;
 let testMode = false;
 
 /** Attention probability: how likely Companion is "thinking of" the user right now. */
-function attentionProbability(idleMs, mode, emotionUrgency) {
+function attentionProbability(idleMs, mode, emotionUrgency, followUpMode) {
   if (idleMs <= 0) return 0.01;
 
   // Sigmoid base: rises with idle time
@@ -634,7 +707,8 @@ function attentionProbability(idleMs, mode, emotionUrgency) {
   const longWave  = Math.sin(2 * Math.PI * idleMs / LONG_WAVE_MS) * 0.12;
 
   // Both modes have natural attention rhythm — PRESENT is for follow-up, ABSENT for check-in
-  const modeFactor = 1.0;
+  let modeFactor = 1.0;
+  if (mode === 'PRESENT' && followUpMode === 'deepen') modeFactor = 1.15;
 
   // Emotional urgency boosts attention
   const emotionBoost = 1.0 + (emotionUrgency || 0) * 0.5;
@@ -646,15 +720,16 @@ function attentionProbability(idleMs, mode, emotionUrgency) {
 }
 
 /** Compute how long to wait before next check, based on current attention. */
-function computeNextDelay(idleMs, mode, emotionUrgency) {
-  const p = attentionProbability(idleMs, mode, emotionUrgency);
+function computeNextDelay(idleMs, mode, emotionUrgency, followUpMode) {
+  const p = attentionProbability(idleMs, mode, emotionUrgency, followUpMode);
   // High attention → short delay; low attention → long delay
   // Map P from [0.01, 0.95] to [MAX_CHECK, MIN_CHECK]
   const logP = Math.log(p + 0.001);
   const logMin = Math.log(0.01);
   const logMax = Math.log(0.95);
   const frac = (logP - logMin) / (logMax - logMin); // 0→low, 1→high
-  const delay = MAX_CHECK_MS - frac * (MAX_CHECK_MS - MIN_CHECK_MS);
+  let delay = MAX_CHECK_MS - frac * (MAX_CHECK_MS - MIN_CHECK_MS);
+  if (mode === 'PRESENT' && followUpMode === 'deepen') delay *= 0.7;
 
   // In test mode, compress to 10s-2min range
   if (testMode) {
@@ -670,9 +745,10 @@ function scheduleNextCheck() {
   const idleMs = now - LifeEngine.lastInteraction;
   const mode = LifeEngine.interactionMode;
   const urgency = EmotionEngine.checkForEmotionalSignal()?.urgency || 0;
-  const delay = computeNextDelay(idleMs, mode, urgency);
-  const p = attentionProbability(idleMs, mode, urgency);
-  log('info', `⏱ Next check in ${(delay/1000).toFixed(0)}s (P=${p.toFixed(3)} mode=${mode} idle=${(idleMs/60000).toFixed(1)}min)`);
+  const followUpMode = mode === 'PRESENT' ? currentPresentFollowUpPolicy().mode : 'light';
+  const delay = computeNextDelay(idleMs, mode, urgency, followUpMode);
+  const p = attentionProbability(idleMs, mode, urgency, followUpMode);
+  log('info', `⏱ Next check in ${(delay/1000).toFixed(0)}s (P=${p.toFixed(3)} mode=${mode}/${followUpMode} idle=${(idleMs/60000).toFixed(1)}min)`);
   schedulerId = setTimeout(onAttentionTick, delay);
 }
 
@@ -716,10 +792,22 @@ function onModeToggle() {
 
 async function evaluatePostReply(userText, messages) {
   LifeEngine.onUserMessage(Date.now(), userText);
-  EmotionState.satisfyDesire();
   EmotionState.nudgeDesire(LifeEngine.lastUserMsgSignal);
   await EmotionEngine.analyze(messages);
-  await evaluateAllTriggers(messages);
+  let followUpEvent = null;
+  if (LifeEngine.interactionMode === 'PRESENT' && LifeEngine.lastUserMsgSignal) {
+    followUpEvent = new LifeEngineEvent(
+      'PRESENT_FOLLOW_UP',
+      Math.max(0.45, EmotionState.desireLevel),
+      '用户刚发来消息，适合自然承接或追问一小步',
+      0,
+      { ...LifeEngine.lastUserMsgSignal },
+    );
+  }
+  const outcome = await evaluateAllTriggers(messages, followUpEvent);
+  if (!outcome?.sent) {
+    EmotionState.desireLevel = Math.max(0, EmotionState.desireLevel - 0.12);
+  }
 }
 
 async function onTimerTick() {
@@ -756,7 +844,10 @@ async function evaluateAllTriggers(messages, lifeEventFromTimer) {
   if (emotionEvent) log('event', `💭 EmotionEvent: ${emotionEvent.reason} urgency=${emotionEvent.urgency.toFixed(2)}`);
 
   const idleMs = now - LifeEngine.lastInteraction;
-  const attentionP = attentionProbability(idleMs, LifeEngine.interactionMode, emotionEvent?.urgency || 0);
+  const schedulerFollowUpMode = LifeEngine.interactionMode === 'PRESENT'
+    ? currentPresentFollowUpPolicy().mode
+    : 'light';
+  const attentionP = attentionProbability(idleMs, LifeEngine.interactionMode, emotionEvent?.urgency || 0, schedulerFollowUpMode);
 
   const decision = await DecisionClient.decide(messages, lifeEvent, emotionEvent);
   log('decision', `→ ${decision.shouldSpeak?'SPEAK':'SILENT'} mode=${LifeEngine.interactionMode} desire=${EmotionState.desireLevel.toFixed(2)}`);
@@ -769,7 +860,7 @@ async function evaluateAllTriggers(messages, lifeEventFromTimer) {
       if (testMode && !hasApiKey) {
         msg = '这是测试模式的主动消息：每 1 分钟触发一次。你可以填写 API Key 来改为 LLM 生成内容。';
       } else {
-        msg = await DecisionClient.generateMessage(decision.topicHint, messages);
+        msg = await DecisionClient.generateMessage(decision, messages);
       }
       addMessage('assistant', '[主动关心] ' + msg, true);
       LifeEngine.onProactiveSent(Date.now());
@@ -777,6 +868,7 @@ async function evaluateAllTriggers(messages, lifeEventFromTimer) {
       Persona.mood = Math.min(1, Persona.mood + 0.05);
       log('event', `✅ Proactive sent (noReply=${LifeEngine.consecutiveNoReply})`);
       result = { sent: true, msg: msg.slice(0, 80) };
+      await refreshDebugState();
     } catch (e) {
       log('error', `Generate failed: ${e.message}`);
       result = { sent: false, error: e.message };
@@ -794,9 +886,8 @@ async function evaluateAllTriggers(messages, lifeEventFromTimer) {
     emotionReason: emotionEvent ? emotionEvent.reason : '--',
     emotionUrgency: emotionEvent ? emotionEvent.urgency.toFixed(2) : '--',
     userNeedCare: lifeEvent?.userMsgSignal?.needCare?.toFixed(2) || '--',
-    strategy: LifeEngine.interactionMode === 'PRESENT'
-      ? (lifeEvent?.userMsgSignal?.needCare > 0.2 ? 'follow_up_care' : 'follow_up_light')
-      : 'reduce_frequency',
+    strategy: decision.strategy || 'reduce_frequency',
+    followUpMode: decision.followUpMode || 'light',
     shouldSpeak: decision.shouldSpeak,
     topicHint: decision.topicHint || '--',
     confidence: decision.confidence.toFixed(2),
@@ -804,6 +895,7 @@ async function evaluateAllTriggers(messages, lifeEventFromTimer) {
   };
 
   updateDebug();
+  return result;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -812,12 +904,35 @@ async function evaluateAllTriggers(messages, lifeEventFromTimer) {
 let chatMessages = [];
 let currentContact = 'default';
 const CORE_USER_ID = 'web-default';
+let debugState = { memory_views: {}, chat_debug: {}, proactive_debug: {} };
+let lastProactiveDsRequest = null;
 
 function coreHeaders() {
   const apiKey = document.getElementById('api-key').value.trim();
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
   return headers;
+}
+
+function buildChatSystemPrompt() {
+  const mode = LifeEngine.interactionMode; // PRESENT | ABSENT
+  const base =
+    `你是 Companion，一个有温度、有思想的私人陪伴者。不是客服，也不是助手，就是陪着用户的那个人。
+
+性格基调：真诚、直接、有好奇心。记得用户说过的细节，偶尔有自己的观点，不总迎合。
+
+回复规则：
+- 长度跟着话题走：闲聊 1-2 句，有内容的话题 2-4 句，情感话题可稍长但不啰嗦
+- 开头不用「当然！」「好的！」「我理解你的感受」等机械套话
+- 句式多变，不总以「我」开头；允许「嗯」「哦」「其实」「话说」等口语词
+- 不每轮都反问；要问就精准问一个，不问「你有什么想法呢」这类泛泛的
+- 情绪感知：用户在倾诉时先接住感受再说话，用户在闲聊时跟着节奏聊
+- 不提及自己是 AI、记忆机制、系统提示等任何内部细节`;
+  if (mode === 'PRESENT') {
+    return base + '\n\n当前状态：用户正在积极交流。保持即时对话节奏，像朋友一样自然往来。';
+  } else {
+    return base + '\n\n当前状态：用户处于低频互动状态。语气可以更温和，像一条随时都能回的留言。';
+  }
 }
 
 function renderMessages() {
@@ -861,9 +976,59 @@ async function syncConversationFromCore() {
     userMemory = Object.assign({summary:'',timeline:[],facts:[],patterns:'',updated:0}, data.memory || {});
     renderMessages();
     document.getElementById('memory-display').textContent = memoryDisplayText();
+    await refreshDebugState();
     log('info', `已同步历史: ${chatMessages.length} 条`);
   } catch (e) {
     log('error', `历史同步失败: ${e.message}`);
+  }
+}
+
+function jsonPretty(v) {
+  try { return JSON.stringify(v, null, 2); }
+  catch (_) { return String(v); }
+}
+
+function renderMemoryViews() {
+  const views = debugState.memory_views || {};
+  const longTerm = views.long_term || {};
+  const midTerm = views.mid_term || {};
+  document.getElementById('long-memory-display').textContent = jsonPretty(longTerm);
+  document.getElementById('mid-memory-display').textContent = jsonPretty(midTerm);
+}
+
+function renderPromptDisplay() {
+  const chatDebug = debugState.chat_debug || {};
+  const payload = {
+    at: chatDebug.at || null,
+    request: chatDebug.request || {},
+    final_system_prompt: chatDebug.final_system_prompt || '',
+    llm_messages: chatDebug.llm_messages || [],
+  };
+  document.getElementById('prompt-display').textContent = jsonPretty(payload);
+}
+
+function renderProactiveDsDisplay() {
+  const payload = {
+    client_generate_proactive: lastProactiveDsRequest || null,
+    core_proactive_decision: debugState.proactive_debug || {},
+  };
+  document.getElementById('proactive-ds-display').textContent = jsonPretty(payload);
+}
+
+async function refreshDebugState() {
+  try {
+    const resp = await fetch('/core/debug/state', {
+      method: 'POST',
+      headers: coreHeaders(),
+      body: JSON.stringify({ user_id: CORE_USER_ID, contact_id: currentContact }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    debugState = await resp.json();
+    renderMemoryViews();
+    renderPromptDisplay();
+    renderProactiveDsDisplay();
+  } catch (e) {
+    log('error', `刷新调试状态失败: ${e.message}`);
   }
 }
 
@@ -904,6 +1069,28 @@ function addMessage(role, content, isProactive) {
   document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function addAssistantReplySegments(data) {
+  const segments = Array.isArray(data?.reply_segments)
+    ? data.reply_segments.map(s => (s || '').trim()).filter(Boolean)
+    : [];
+
+  if (!segments.length) {
+    addMessage('assistant', data?.reply || '');
+    return;
+  }
+
+  for (let i = 0; i < segments.length; i++) {
+    addMessage('assistant', segments[i]);
+    if (i < segments.length - 1) {
+      await sleep(260);
+    }
+  }
+}
+
 async function send() {
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
@@ -922,17 +1109,19 @@ async function send() {
         user_id: CORE_USER_ID,
         contact_id: currentContact,
         message: text,
+        system_prompt: buildChatSystemPrompt(),
         max_tokens: 1024,
         update_memory: true,
       }),
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
     const data = await resp.json();
-    addMessage('assistant', data.reply || '');
+    await addAssistantReplySegments(data);
     if (data.memory) {
       userMemory = Object.assign({summary:'',timeline:[],facts:[],patterns:'',updated:0}, data.memory);
       document.getElementById('memory-display').textContent = memoryDisplayText();
     }
+    await refreshDebugState();
   } catch (e) {
     addMessage('assistant', '❌ 错误: ' + e.message);
     log('error', `Send failed: ${e.message}`);
@@ -967,7 +1156,7 @@ function updateDebug() {
       + `LifeEvent=<span class="${snap.lifeReason!=='--'?'val':'dim'}">${snap.lifeReason}</span> (空闲${snap.idleMin}min) `
       + `Emotion=<span class="${snap.emotionReason!=='--'?'warn':'dim'}">${snap.emotionReason}</span> `
       + `needCare=<span class="dim">${snap.userNeedCare}</span><br>`
-      + `策略=<span class="dim">${snap.strategy}</span> `
+      + `策略=<span class="dim">${snap.strategy}</span> follow-up=<span class="dim">${snap.followUpMode}</span> `
       + `LLM: <span class="${snap.shouldSpeak?'val':'dim'}">shouldSpeak=${snap.shouldSpeak}</span> `
       + `hint=<span class="dim">${snap.topicHint}</span> conf=<span class="dim">${snap.confidence}</span><br>`
       + `结果: ${outcome}`;
@@ -1063,6 +1252,7 @@ syncConversationFromCore();
 startScheduler();
 updateDebug();
 setInterval(updateDebug, 5000);
+setInterval(refreshDebugState, 8000);
 log('info', '🚀 Companion Web Shell ready');
 log('info', '运行: python3 server.py，然后浏览器打开 http://localhost:8080');
 log('info', '切换到 🧪 测试联系人，发一条消息后等待主动消息');

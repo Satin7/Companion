@@ -9,6 +9,7 @@ import urllib.error
 import ssl
 import os
 import socket
+import mimetypes
 
 TARGET = "https://api.deepseek.com"
 CORE_TARGET = "http://127.0.0.1:8000"
@@ -16,18 +17,50 @@ PORT = 8080
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class Handler(BaseHTTPRequestHandler):
+    def _send_static(self, filepath: str, head_only: bool = False):
+        content_type, _ = mimetypes.guess_type(filepath)
+        self.send_response(200)
+        self.send_header("Content-Type", content_type or "application/octet-stream")
+        self.end_headers()
+        if not head_only:
+            with open(filepath, "rb") as f:
+                self.wfile.write(f.read())
+
+    def _serve_index(self, head_only: bool = False):
+        self._send_static(os.path.join(WEB_DIR, "index.html"), head_only=head_only)
+
     def do_GET(self):
         path = self.path.split("?")[0]
         if path == "/" or path == "":
-            path = "/index.html"
+            return self._serve_index()
+        if path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
+
         filepath = os.path.join(WEB_DIR, path.lstrip("/"))
         if os.path.isfile(filepath):
-            self.send_response(200)
-            ct = "text/html" if path.endswith(".html") else "text/css" if path.endswith(".css") else "application/javascript"
-            self.send_header("Content-Type", ct)
+            self._send_static(filepath)
+        elif "text/html" in self.headers.get("Accept", "") and "." not in os.path.basename(path):
+            self._serve_index()
+        else:
+            self.send_response(404)
             self.end_headers()
-            with open(filepath, "rb") as f:
-                self.wfile.write(f.read())
+
+    def do_HEAD(self):
+        path = self.path.split("?")[0]
+        if path == "/" or path == "":
+            return self._serve_index(head_only=True)
+        if path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
+
+        filepath = os.path.join(WEB_DIR, path.lstrip("/"))
+        if os.path.isfile(filepath):
+            self._send_static(filepath, head_only=True)
+        elif "text/html" in self.headers.get("Accept", "") and "." not in os.path.basename(path):
+            self._serve_index(head_only=True)
         else:
             self.send_response(404)
             self.end_headers()
@@ -89,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 

@@ -21,6 +21,10 @@ class TriggerEngine:
         self.connections: Dict[str, List[WebSocket]] = {}
         self.session_manager = session_manager
         self._lock = asyncio.Lock()
+        self.last_proactive_debug: Dict[str, Any] = {}
+
+    def get_last_proactive_debug(self) -> Dict[str, Any]:
+        return dict(self.last_proactive_debug)
 
     def register_trigger(self, trigger_def: Dict[str, Any]) -> str:
         tid = trigger_def.get("id") or f"trig_{len(self.triggers)+1}"
@@ -106,12 +110,14 @@ class TriggerEngine:
         if mode == "PRESENT":
             need_care = 0.0
             has_question = False
+            intensity = 0.0
             if life and life.user_msg_signal:
                 need_care = float(life.user_msg_signal.get("needCare", 0.0) or 0.0)
                 has_question = bool(life.user_msg_signal.get("hasQuestion", False))
+                intensity = float(life.user_msg_signal.get("intensity", 0.0) or 0.0)
             if need_care > 0.2:
                 return "follow_up_care"
-            if has_question:
+            if has_question or intensity > 0.3:
                 return "follow_up_deepen"
             return "follow_up_light"
 
@@ -137,9 +143,11 @@ class TriggerEngine:
                 strategy="test_interval_1m",
             )
 
+        mode = (req.interaction_mode or "ABSENT").upper()
         has_signal = bool(req.life_event or req.emotion_event)
         strategy = self._strategy_for(req)
-        if not has_signal and req.desire_level < 0.5:
+        min_desire = 0.15 if mode == "PRESENT" else 0.5
+        if not has_signal and req.desire_level < min_desire:
             return ProactiveDecisionResponse(
                 should_speak=False,
                 topic_hint=None,
@@ -158,20 +166,48 @@ class TriggerEngine:
             "lifeEvent": req.life_event.dict() if req.life_event else None,
             "emotionEvent": req.emotion_event.dict() if req.emotion_event else None,
         }
-        sys_prompt = (
-            "You are a proactive companion decision engine. "
-            "Decide whether the assistant should proactively speak now. "
-            "Return strict JSON only: "
-            '{"shouldSpeak":bool,"topicHint":"short Chinese hint or null","confidence":0.0-1.0}. '
-            "Be conservative when no strong signal exists."
-        )
+        if mode == "PRESENT":
+            sys_prompt = (
+                "你是主动陪伴决策引擎。当前处于 PRESENT 模式：用户正在和 Companion 实时聊天。"
+                "根据上下文，判断现在是否应该主动承接一句、追问一小步，或自然延续话题。\n"
+                "只输出严格 JSON：{\"shouldSpeak\":bool,\"topicHint\":\"简短中文话题提示或null\",\"confidence\":0.0-1.0}\n"
+                "判断原则：\n"
+                "- PRESENT 不是留言打扰场景，而是实时对话承接场景\n"
+                "- 只要存在轻度连接欲望，或刚出现适合追问/接话的点，就可以主动\n"
+                "- 用户情绪低落、刚提出问题、话题有展开空间时，更应该主动\n"
+                "- 如果上一轮已经完整收束、继续接话会显得突兀，再选择不发\n"
+                "- topicHint 用简短中文描述，例如「顺着他刚才的问题追问一句」，不要长篇大论"
+            )
+        else:
+            sys_prompt = (
+                "你是主动陪伴决策引擎。根据当前上下文，判断现在是否应该主动发起一条消息。\n"
+                "只输出严格 JSON：{\"shouldSpeak\":bool,\"topicHint\":\"简短中文话题提示或null\",\"confidence\":0.0-1.0}\n"
+                "判断原则：\n"
+                "- 无强信号时保守，默认不发\n"
+                "- 用户情绪低落或明显需要关心时，适当主动\n"
+                "- 连续未回复超过 2 次，减少频率，避免骚扰\n"
+                "- topicHint 用简短中文描述，例如「关心一下睡眠情况」，不要长篇大论"
+            )
 
         try:
+            ds_messages = [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": json.dumps(ctx, ensure_ascii=False)},
+            ]
+            self.last_proactive_debug = {
+                "at": time.time(),
+                "request": {
+                    "model": "deepseek-v4-pro",
+                    "max_tokens": 180,
+                    "temperature": 0.9,
+                    "messages": ds_messages,
+                },
+                "context": ctx,
+                "strategy": strategy,
+                "test_mode": False,
+            }
             response = await self.deepseek.chat_complete(
-                messages=[
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": json.dumps(ctx, ensure_ascii=False)},
-                ],
+                messages=ds_messages,
                 max_tokens=180,
                 api_key=api_key_override,
             )
@@ -184,6 +220,10 @@ class TriggerEngine:
                 .strip()
             )
             payload = json.loads(content[content.find("{") : content.rfind("}") + 1])
+            self.last_proactive_debug["response"] = {
+                "raw": content,
+                "parsed": payload,
+            }
             return ProactiveDecisionResponse(
                 should_speak=bool(payload.get("shouldSpeak", False)),
                 topic_hint=payload.get("topicHint") or None,
@@ -192,6 +232,22 @@ class TriggerEngine:
             )
         except Exception:
             fallback_should_speak = has_signal and req.desire_level >= 0.2
+            self.last_proactive_debug = {
+                "at": time.time(),
+                "request": {
+                    "model": "deepseek-v4-pro",
+                    "max_tokens": 180,
+                    "temperature": 0.9,
+                    "messages": [
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": json.dumps(ctx, ensure_ascii=False)},
+                    ],
+                },
+                "context": ctx,
+                "strategy": strategy,
+                "test_mode": False,
+                "fallback": True,
+            }
             return ProactiveDecisionResponse(
                 should_speak=fallback_should_speak,
                 topic_hint=None,

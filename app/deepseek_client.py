@@ -29,6 +29,7 @@ class DeepseekClient:
         messages: list,
         model: str = "deepseek-v4-pro",
         max_tokens: int = 256,
+        temperature: float = 0.9,
         api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         headers = self._auth_headers(api_key)
@@ -38,6 +39,7 @@ class DeepseekClient:
             "messages": messages,
             "stream": False,
             "max_tokens": max_tokens,
+            "temperature": temperature,
         }
         resp = await self._client.post(url, json=payload, headers=headers)
         resp.raise_for_status()

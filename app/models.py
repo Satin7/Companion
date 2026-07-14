@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, List
 
 
@@ -62,6 +62,19 @@ class ProactiveDecisionResponse(BaseModel):
     strategy: str = "reduce_frequency"
 
 
+class ProactiveGenerateRequest(BaseModel):
+    user_id: str = "default"
+    contact_id: str = "default"
+    interaction_mode: str = "ABSENT"
+    topic_hint: Optional[str] = None
+    messages: List[ConversationMessage] = []
+
+
+class ProactiveGenerateResponse(BaseModel):
+    message: str
+    message_segments: List[str] = Field(default_factory=list)
+
+
 class ChatReplyRequest(BaseModel):
     user_id: str = "default"
     contact_id: str = "default"
@@ -95,6 +108,7 @@ class MemoryProfile(BaseModel):
 class ChatReplyResponse(BaseModel):
     session_id: str
     reply: str
+    reply_segments: List[str] = Field(default_factory=list)
     history_count: int
     memory: MemoryProfile
 

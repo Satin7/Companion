@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('app/models.py'\\).read\\(\\)\\); print\\('models.py OK'\\)\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('app/main.py'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
+      "Bash(pip install *)",
+      "Bash(timeout 5 python -c ' *)",
+      "Bash(python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info)",
+      "Bash(python3 web-shell/server.py)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s -o /dev/null -w \"web-shell: %{http_code}\" http://localhost:8080/)"
+    ]
+  }
+}
