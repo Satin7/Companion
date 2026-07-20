@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import WebSocket
 import asyncio
 import json
+import logging
 import time
 from app.deepseek_client import DeepseekClient
 from app.models import (
@@ -12,6 +13,12 @@ from app.models import (
     ProactiveDecisionResponse,
 )
 from app.sessions import SessionManager
+from app.state_engine import (
+    resolve_present_follow_up_policy,
+    follow_up_mode_from_strategy,
+)
+
+logger = logging.getLogger("companion.trigger")
 
 
 class TriggerEngine:
@@ -108,24 +115,22 @@ class TriggerEngine:
         emotion = req.emotion_event
 
         if mode == "PRESENT":
-            need_care = 0.0
-            has_question = False
-            intensity = 0.0
-            if life and life.user_msg_signal:
-                need_care = float(life.user_msg_signal.get("needCare", 0.0) or 0.0)
-                has_question = bool(life.user_msg_signal.get("hasQuestion", False))
-                intensity = float(life.user_msg_signal.get("intensity", 0.0) or 0.0)
-            if need_care > 0.2:
-                return "follow_up_care"
-            if has_question or intensity > 0.3:
-                return "follow_up_deepen"
-            return "follow_up_light"
+            signal = life.user_msg_signal if life and life.user_msg_signal else None
+            return resolve_present_follow_up_policy(signal, req.desire_level)["strategy"]
 
         if emotion and emotion.urgency > 0.5:
             return "check_in"
         if req.consecutive_no_reply > 3 and req.desire_level > 0.7:
             return "keep_company"
         return "reduce_frequency"
+
+    def _min_desire_for(self, req: ProactiveDecisionRequest) -> float:
+        """Desire threshold below which Companion stays silent."""
+        mode = (req.interaction_mode or "ABSENT").upper()
+        if mode == "PRESENT":
+            signal = req.life_event.user_msg_signal if req.life_event and req.life_event.user_msg_signal else None
+            return resolve_present_follow_up_policy(signal, req.desire_level)["threshold"]
+        return 0.5
 
     async def decide_proactive(
         self,
@@ -134,25 +139,29 @@ class TriggerEngine:
     ) -> ProactiveDecisionResponse:
         if req.test_mode:
             now_ms = int(req.now_ts_ms or (time.time() * 1000))
-            last_ms = int(req.last_proactive_sent_ms or now_ms)
-            due = (now_ms - last_ms) >= 60_000
+            last_ms = int(req.last_proactive_sent_ms or 0)
+            # No anchor yet (direct API caller) → first message is due immediately
+            due = last_ms <= 0 or (now_ms - last_ms) >= 60_000
             return ProactiveDecisionResponse(
                 should_speak=due,
                 topic_hint="测试模式问候" if due else None,
                 confidence=1.0,
                 strategy="test_interval_1m",
+                follow_up_mode="light",
             )
 
         mode = (req.interaction_mode or "ABSENT").upper()
         has_signal = bool(req.life_event or req.emotion_event)
         strategy = self._strategy_for(req)
-        min_desire = 0.15 if mode == "PRESENT" else 0.5
+        follow_up_mode = follow_up_mode_from_strategy(strategy)
+        min_desire = self._min_desire_for(req)
         if not has_signal and req.desire_level < min_desire:
             return ProactiveDecisionResponse(
                 should_speak=False,
                 topic_hint=None,
                 confidence=0.0,
                 strategy=strategy,
+                follow_up_mode=follow_up_mode,
             )
 
         ctx = {
@@ -219,7 +228,11 @@ class TriggerEngine:
                 .replace("```", "")
                 .strip()
             )
-            payload = json.loads(content[content.find("{") : content.rfind("}") + 1])
+            s = content.find("{")
+            e = content.rfind("}")
+            if s == -1 or e == -1:
+                raise ValueError(f"No JSON found in LLM response: {content[:100]}")
+            payload = json.loads(content[s : e + 1])
             self.last_proactive_debug["response"] = {
                 "raw": content,
                 "parsed": payload,
@@ -229,9 +242,10 @@ class TriggerEngine:
                 topic_hint=payload.get("topicHint") or None,
                 confidence=float(payload.get("confidence", 0.0) or 0.0),
                 strategy=strategy,
+                follow_up_mode=follow_up_mode,
             )
         except Exception:
-            fallback_should_speak = has_signal and req.desire_level >= 0.2
+            logger.warning("decide_proactive LLM call failed — falling back to should_speak=False")
             self.last_proactive_debug = {
                 "at": time.time(),
                 "request": {
@@ -249,8 +263,9 @@ class TriggerEngine:
                 "fallback": True,
             }
             return ProactiveDecisionResponse(
-                should_speak=fallback_should_speak,
+                should_speak=False,
                 topic_hint=None,
-                confidence=0.3 if fallback_should_speak else 0.0,
+                confidence=0.0,
                 strategy=strategy,
+                follow_up_mode=follow_up_mode,
             )

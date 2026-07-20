@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Companion Web Shell — 主动对话调试</title>
+<title>Companion Web Shell</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;background:#f5f7fa}
@@ -25,6 +25,7 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
 #messages .assistant .bubble{background:#fff;color:#111;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 #messages .proactive .bubble{background:#FEF3C7;color:#92400E;border:1px solid #FCD34D}
 #messages .meta{font-size:10px;opacity:.6;margin-top:4px}
+#messages .typing .bubble{background:#fff;color:#6c7086;box-shadow:0 1px 3px rgba(0,0,0,.1);font-style:italic}
 #input-area{display:flex;padding:8px 12px;background:#fff;gap:8px;border-top:1px solid #e5e7eb}
 #input-area input{flex:1;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px}
 #input-area button{background:#4F46E5;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px}
@@ -34,6 +35,8 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
 #debug-panel h2{font-size:14px;padding:12px 14px;background:#313244;color:#f5c2e7;margin:0}
 .section{padding:8px 14px;border-bottom:1px solid #313244}
 .section h3{font-size:12px;color:#89b4fa;margin-bottom:4px}
+.section>summary{cursor:pointer;color:#89b4fa;font-size:12px;font-weight:bold;list-style-position:inside}
+.section>summary:hover{color:#b4befe}
 .section .val{color:#a6e3a1}
 .section .warn{color:#fab387}
 .section .err{color:#f38ba8}
@@ -58,17 +61,27 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
       <option value="default">Companion</option>
       <option value="test">🧪 主动消息测试 (1分钟)</option>
     </select>
-    <span style="font-size:12px;margin-left:8px">模式:</span>
-    <select id="mode-toggle" onchange="onModeToggle()">
+    <span style="font-size:12px;margin-left:8px">运行模式:</span>
+    <select id="runtime-mode">
+      <option value="normal" selected>普通模式</option>
+      <option value="live">Live 模式</option>
+    </select>
+    <span style="font-size:12px;margin-left:8px">互动强度:</span>
+    <select id="mode-toggle">
       <option value="ABSENT">ABSENT (弱互动)</option>
       <option value="PRESENT">PRESENT (强互动)</option>
+    </select>
+    <span style="font-size:12px;margin-left:8px">🔊 语音:</span>
+    <select id="voice-mode-toggle">
+      <option value="0">关闭</option>
+      <option value="1">开启</option>
     </select>
   </div>
   <div id="api-key-area">
     <span>🔑 DeepSeek API Key:</span>
     <input id="api-key" type="password" placeholder="sk-...">
     <button onclick="saveApiKey()">保存</button>
-    <span style="font-size:11px;color:#856404">API: server.py 自动转发 → api.deepseek.com</span>
+    <span id="runtime-hint" style="font-size:11px;color:#856404">普通模式 — HTTP /core/chat/reply</span>
   </div>
   <div id="messages"></div>
   <div id="input-area">
@@ -84,908 +97,167 @@ body{font-family:-apple-system,system-ui,sans-serif;display:flex;height:100vh;ba
   <div class="section" id="state-life"></div>
   <div class="section" id="state-emotion"></div>
   <div class="section" id="state-persona"></div>
+  <div class="section" id="state-engagement"></div>
   <div class="section" id="state-scheduler"></div>
-  <div class="section">
-    <h3>🧠 记忆</h3>
-    <div id="memory-display" class="dim" style="white-space:pre-wrap;max-height:120px;overflow-y:auto">(暂无记忆)</div>
-  </div>
-  <div class="section">
-    <h3>🗂 长期记忆</h3>
-    <div id="long-memory-display" class="code-box dim">(暂无)</div>
-  </div>
-  <div class="section">
-    <h3>📒 中期摘要</h3>
-    <div id="mid-memory-display" class="code-box dim">(暂无)</div>
-  </div>
-  <div class="section">
-    <h3>🧩 最终 Prompt（发给模型）</h3>
-    <div id="prompt-display" class="code-box dim">(暂无)</div>
-  </div>
-  <div class="section">
-    <h3>📤 主动消息发送给 DS</h3>
-    <div id="proactive-ds-display" class="code-box dim">(暂无)</div>
-  </div>
+  <details class="section">
+    <summary>🧠 记忆</summary>
+    <div id="memory-display" class="dim" style="white-space:pre-wrap;max-height:120px;overflow-y:auto;margin-top:6px">(暂无记忆)</div>
+  </details>
+  <details class="section">
+    <summary>🗂 长期记忆</summary>
+    <div id="long-memory-display" class="code-box dim" style="margin-top:6px">(暂无)</div>
+  </details>
+  <details class="section">
+    <summary>📒 中期摘要</summary>
+    <div id="mid-memory-display" class="code-box dim" style="margin-top:6px">(暂无)</div>
+  </details>
+  <details class="section" id="prompt-details">
+    <summary>🧩 最终 Prompt（发给模型）</summary>
+    <div id="prompt-display" class="code-box dim" style="margin-top:6px">(暂无)</div>
+  </details>
+  <details class="section">
+    <summary>📤 主动消息发送给 DS</summary>
+    <div id="proactive-ds-display" class="code-box dim" style="margin-top:6px">(暂无)</div>
+  </details>
   <div id="log-area"></div>
 </div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════
-// DEEPSEEK CLIENT
+// Companion Web Shell — dual-mode frontend
+//   Normal mode : simple HTTP /core/chat/reply (one question → one answer)
+//   Live mode   : WebSocket-driven realtime session (state engines on backend)
 // ═══════════════════════════════════════════════════════════════
-const DS = {
-  async complete(messages, opts = {}) {
-    const body = {
-      model: 'deepseek-v4-pro',
-      messages,
-      stream: false,
-      max_tokens: opts.maxTokens || 1024,
-    };
-    if (opts.reasoning) {
-      body.thinking = { type: 'enabled' };
-      body.reasoning_effort = opts.reasoning;
-    }
-    const apiKey = document.getElementById('api-key').value.trim();
-    if (!apiKey) throw new Error('请先设置 API Key');
-    log('api', `→ POST /chat/completions (${opts.label || ''})`);
-    const resp = await fetch('/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
-    const json = await resp.json();
-    if (opts.label === 'generate-proactive') {
-      lastProactiveDsRequest = {
-        at: Date.now(),
-        request: body,
-        response: json,
-      };
-      renderProactiveDsDisplay();
-    }
-    return json.choices[0].message.content;
-  },
-};
 
-// ═══════════════════════════════════════════════════════════════
-// ENGINE TYPES (mirrors Java classes)
-// ═══════════════════════════════════════════════════════════════
-class EmotionalProfile {
-  constructor(v, a, d, themes) {
-    this.valence = v; this.arousal = a; this.dominance = d; this.keyThemes = themes || [];
-    this.timestamp = Date.now();
-  }
-  isNegative() { return this.valence < -0.2; }
-  isHighlyAroused() { return this.arousal > 0.7; }
-  static neutral() { return new EmotionalProfile(0, 0.5, 0.5, []); }
-}
-
-class LifeEngineEvent {
-  constructor(reason, confidence, hint, idleMin, userMsgSignal) {
-    this.reason = reason; this.confidence = confidence;
-    this.contextHint = hint; this.idleMinutes = idleMin;
-    this.userMsgSignal = userMsgSignal || null; // { intensity, depth, needCare }
-  }
-}
-
-class EmotionEngineEvent {
-  constructor(reason, snapshot, urgency) {
-    this.reason = reason; this.snapshot = snapshot; this.urgency = urgency;
-  }
-}
-
-class TriggerDecision {
-  constructor(speak, hint, conf, strategy, followUpMode) {
-    this.shouldSpeak = speak; this.topicHint = hint; this.confidence = conf;
-    this.strategy = strategy || 'reduce_frequency';
-    this.followUpMode = followUpMode || 'light';
-  }
-  static noAction(strategy, followUpMode) { return new TriggerDecision(false, null, 0, strategy, followUpMode); }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// LIFE ENGINE — "Companion 的周围世界"
-// ═══════════════════════════════════════════════════════════════
-const LifeEngine = {
-  state: 'IDLE',            // IDLE | OBSERVING | READY
-  interactionMode: 'ABSENT', // PRESENT | ABSENT
-  lastInteraction: Date.now(),
-  lastProactiveSent: 0,     // timestamp of last proactive message Companion sent
-  consecutiveNoReply: 0,    // how many proactive messages without user reply
-  interactionCount: 0,
-  idleThresholdMs: 2 * 60 * 60 * 1000,
-  activeHours: new Set(),
-  histAvg: 10,
-  lastUserMsgSignal: null,  // { intensity, depth, needCare }
-  initialGreetingSent: false,
-  morningCheckSentDate: '',
-  lastLifeSignalMs: 0,
-  lifeSignalCooldownMs: 30 * 60 * 1000,
-
-  reset() {
-    this.state = 'IDLE';
-    this.interactionMode = 'ABSENT';
-    this.lastInteraction = Date.now();
-    this.lastProactiveSent = 0;
-    this.consecutiveNoReply = 0;
-    this.interactionCount = 0;
-    this.activeHours.clear();
-    this.histAvg = 10;
-    this.lastUserMsgSignal = null;
-    this.initialGreetingSent = false;
-    this.morningCheckSentDate = '';
-    this.lastLifeSignalMs = 0;
-  },
-
-  _todayKey(now) {
-    const d = new Date(now);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  },
-
-  // ── drive source 1: time ──
-
-  onTimerTick(now) {
-    if (this.state === 'READY') return;
-    const idleMs = now - this.lastInteraction;
-    const inWindow = this.activeHours.size === 0 || this.activeHours.has(new Date(now).getHours());
-    const today = this._todayKey(now);
-    const morning =
-      new Date(now).getHours() >= 10 &&
-      this.interactionCount === 0 &&
-      this.morningCheckSentDate !== today;
-    const initial = !this.initialGreetingSent && this.interactionCount === 0 && idleMs > this.idleThresholdMs;
-
-    if (morning) {
-      this.state = 'READY';
-    } else if (initial) {
-      this.state = 'READY';
-    } else if (idleMs > this.idleThresholdMs && inWindow) {
-      this.state = 'READY';
-    }
-  },
-
-  // ── drive source 2: user message ──
-
-  onUserMessage(ts, msgText) {
-    this.lastInteraction = ts;
-    this.interactionCount++;
-    this.histAvg = Math.round((this.histAvg * 4 + this.interactionCount) / 5);
-    this.activeHours.add(new Date(ts).getHours());
-    this.consecutiveNoReply = 0; // user replied → reset
-    if (this.state === 'IDLE') this.state = 'OBSERVING';
-    else if (this.state === 'READY') this.state = 'OBSERVING';
-
-    // Analyze message content (keyword-based, no LLM needed for this layer)
-    if (msgText) {
-      this.lastUserMsgSignal = this._analyzeMessage(msgText);
-    }
-  },
-
-  _analyzeMessage(text) {
-    const needCareWords = ['累', '难', '烦', '焦虑', '压力', '不开心', '难过', '崩溃', '失眠', '害怕', '孤独', '担心', '不舒服', '生病', '失败', '被拒', '分手', '迷茫', '空虚'];
-    const intensityWords = ['太', '非常', '很', '特别', '急', '快', '一直', '总是', '真的', '超级', '好', '极'];
-    const questionWords = ['?', '？', '吗', '呢', '吧', '怎么', '什么', '能不能', '要不要', '可以吗'];
-
-    let needCare = 0, intensity = 0;
-    for (const w of needCareWords) { if (text.includes(w)) needCare++; }
-    for (const w of intensityWords) { if (text.includes(w)) intensity++; }
-    const hasQuestion = questionWords.some(w => text.includes(w));
-    const depth = Math.min(1, text.length / 100); // longer messages = deeper
-
-    // User message is a world event — no auto mode switching
-    // Mode is the user's choice, set manually
-
-    return { intensity: Math.min(1, intensity * 0.3), depth, needCare: Math.min(1, needCare * 0.4), hasQuestion, textLength: text.length };
-  },
-
-  // ── interaction mode ──
-
-  /** Call after Companion sends a proactive message (not a reply). */
-  onProactiveSent(ts) {
-    this.lastProactiveSent = ts;
-    this.consecutiveNoReply++;
-  },
-
-  // ── unified output ──
-
-  checkForLifeSignal(now) {
-    // Mode is user-controlled (manual switch), no auto-evaluation
-    if (this.state !== 'READY') return null;
-    if (this.lastLifeSignalMs > 0 && now - this.lastLifeSignalMs < this.lifeSignalCooldownMs) {
-      return null;
-    }
-    const idleMin = Math.floor((now - this.lastInteraction) / 60000);
-    let reason, hint;
-    if (this.interactionCount === 0 && idleMin > 0) {
-      reason = 'INITIAL_GREETING'; hint = '全新联系人，发起首次问候';
-      this.initialGreetingSent = true;
-    } else if (this.interactionCount === 0 && new Date(now).getHours() >= 10) {
-      reason = 'MORNING_CHECK_IN'; hint = '用户今天还没有聊天';
-      this.morningCheckSentDate = this._todayKey(now);
-    } else {
-      reason = 'PROLONGED_IDLE'; hint = `用户空闲 ${idleMin} 分钟`;
-    }
-    this.state = 'OBSERVING';
-    this.lastLifeSignalMs = now;
-    return new LifeEngineEvent(reason, Math.min(0.95, idleMin / 480), hint, idleMin,
-      this.lastUserMsgSignal ? { ...this.lastUserMsgSignal } : null);
-  },
-
-  status() {
-    return {
-      state: this.state,
-      mode: this.interactionMode,
-      idleMin: Math.floor((Date.now() - this.lastInteraction) / 60000),
-      thresholdMin: Math.floor(this.idleThresholdMs / 60000),
-      interactions: this.interactionCount,
-      noReply: this.consecutiveNoReply,
-      lastMsg: this.lastUserMsgSignal,
-    };
-  },
-};
-
-// ═══════════════════════════════════════════════════════════════
-// EMOTION ENGINE
-// ═══════════════════════════════════════════════════════════════
-const EmotionEngine = {
-  state: 'NEUTRAL', // NEUTRAL | HEIGHTENED | DISTRESSED
-  baseline: EmotionalProfile.neutral(),
-  current: EmotionalProfile.neutral(),
-  derailment: 0,
-  negWeight: 0,
-  lastHash: '',
-
-  reset() {
-    this.state = 'NEUTRAL';
-    this.baseline = EmotionalProfile.neutral();
-    this.current = EmotionalProfile.neutral();
-    this.derailment = 0;
-    this.negWeight = 0;
-    this.lastHash = '';
-  },
-
-  // Lightweight LLM call for sentiment VAD analysis
-  async analyze(messages) {
-    if (messages.length === 0) return;
-    const hash = messages.map(m => m.role + ':' + m.content).join('|');
-    if (hash === this.lastHash) return;
-
-    const sys = 'Output ONLY JSON: {"valence":-1to1,"arousal":0to1,"dominance":0to1,"keyThemes":["chinese","words"]}';
-    const convo = messages.slice(-6).map(m => (m.role === 'user' ? '用户:' : 'AI:') + m.content.slice(0,200)).join('\n');
-    try {
-      const reply = await DS.complete([
-        { role: 'system', content: sys },
-        { role: 'user', content: convo },
-      ], { maxTokens: 128, label: 'sentiment' });
-      const j = JSON.parse(reply.replace(/```[a-z]*\s*/g, '').trim());
-      const p = new EmotionalProfile(
-        parseFloat(j.valence) || 0,
-        parseFloat(j.arousal) || 0.5,
-        parseFloat(j.dominance) || 0.5,
-        j.keyThemes || [],
-      );
-      this._update(p);
-      this.lastHash = hash;
-    } catch (e) {
-      // keyword fallback
-      const p = this._keywordFallback(messages);
-      this._update(p);
-      this.lastHash = hash;
-    }
-  },
-
-  _update(p) {
-    this.current = p;
-    this.baseline = new EmotionalProfile(
-      this.baseline.valence * 0.9 + p.valence * 0.1,
-      this.baseline.arousal * 0.9 + p.arousal * 0.1,
-      this.baseline.dominance * 0.9 + p.dominance * 0.1,
-      this.baseline.keyThemes,
-    );
-    const shift = p.valence - this.baseline.valence;
-    if (this.state === 'NEUTRAL' && (shift < -0.3 || p.isHighlyAroused())) {
-      this.state = 'HEIGHTENED'; this.derailment = 1;
-    } else if (this.state === 'HEIGHTENED') {
-      if (shift < -0.15) { this.derailment++; if (this.derailment >= 3) this.state = 'DISTRESSED'; }
-      else if (shift > -0.05) { this.derailment = Math.max(0, this.derailment - 1); if (this.derailment === 0) this.state = 'NEUTRAL'; }
-    } else if (this.state === 'DISTRESSED') {
-      if (shift > -0.1) { this.derailment = Math.max(0, this.derailment - 1); if (this.derailment <= 1) this.state = 'HEIGHTENED'; }
-    }
-    let w = 0;
-    if (p.valence < -0.3) w += 0.3; if (p.valence < -0.6) w += 0.3;
-    if (p.arousal > 0.7) w += 0.2; if (p.dominance < 0.3) w += 0.2;
-    this.negWeight = Math.min(1, w);
-  },
-
-  _keywordFallback(messages) {
-    const neg = ['担心','累','难','烦','焦虑','压力','不开心','难过','生气','崩溃','失眠','害怕','无聊','孤独'];
-    let score = 0; const themes = [];
-    for (const m of messages) {
-      if (m.role !== 'user') continue;
-      for (const w of neg) { if (m.content.includes(w)) { score += 0.15; if (!themes.includes(w)) themes.push(w); } }
-    }
-    return new EmotionalProfile(Math.max(-1, -score), Math.min(1, score * 1.5), 0.5, themes);
-  },
-
-  checkForEmotionalSignal() {
-    let reason = null, urgency = 0;
-    if (this.state === 'DISTRESSED') {
-      urgency = Math.min(1, 0.6 + this.derailment * 0.1); reason = 'SUSTAINED_DISTRESS';
-    } else if (this.state === 'HEIGHTENED') {
-      urgency = 0.4 + this.negWeight * 0.3;
-      reason = this.current.isHighlyAroused() ? 'HIGH_AROUSAL' : 'NEGATIVE_SHIFT';
-    }
-    if (reason && urgency > 0.35) {
-      this.derailment = Math.max(0, this.derailment - 1);
-      return new EmotionEngineEvent(reason, this.current, urgency);
-    }
-    return null;
-  },
-
-  status() {
-    return {
-      state: this.state,
-      valence: this.current.valence.toFixed(2),
-      arousal: this.current.arousal.toFixed(2),
-      baselineVal: this.baseline.valence.toFixed(2),
-      derailment: this.derailment,
-      negWeight: this.negWeight.toFixed(2),
-    };
-  },
-};
-
-// ═══════════════════════════════════════════════════════════════
-// EMOTION ENGINE — "Companion 的感受层" (desire lives here)
-// ═══════════════════════════════════════════════════════════════
-const EmotionState = {
-  desireLevel: 0.0,          // 连接欲望 0~1
-  desireBaseRate: 0.05,      // 基础积累速度 / 每分钟
-  desireMultiplier: 1.0,     // 情感调节乘数
-
-  reset() {
-    this.desireLevel = 0.0;
-    this.desireBaseRate = 0.05;
-    this.desireMultiplier = 1.0;
-  },
-
-  /** Called every tick: accumulate desire based on idle time and emotional state */
-  accumulateDesire(idleMinutes, emotionUrgency) {
-    const gain = idleMinutes * this.desireBaseRate * this.desireMultiplier;
-    this.desireLevel = Math.min(1.0, this.desireLevel + gain);
-    // emotionUrgency boosts multiplier for next round
-    if (emotionUrgency > 0.3) this.desireMultiplier = 1.0 + emotionUrgency * 1.5;
-    else this.desireMultiplier = Math.max(0.5, this.desireMultiplier - 0.05); // decay
-  },
-
-  /** User entering PRESENT mode: companion has accumulated things to say. */
-  entryBurst() {
-    this.desireLevel = Math.min(1.0, this.desireLevel + 0.35);
-    log('event', `💥 Desire burst: ${this.desireLevel.toFixed(2)} (PRESENT entry)`);
-  },
-
-  /** User interaction or proactive message satisfies desire */
-  satisfyDesire() {
-    this.desireLevel = Math.max(0, this.desireLevel - 0.4);
-    this.desireMultiplier = 1.0;
-  },
-
-  /** User message content can nudge desire up or down */
-  nudgeDesire(userMsgSignal) {
-    if (!userMsgSignal) return;
-    if (userMsgSignal.needCare > 0.3) this.desireLevel += 0.1; // user needs care → desire up
-    if (userMsgSignal.hasQuestion) this.desireLevel += 0.05;    // user asking → desire up
-  },
-
-  status() {
-    return {
-      desire: this.desireLevel.toFixed(2),
-      rate: this.desireBaseRate.toFixed(3),
-      multiplier: this.desireMultiplier.toFixed(2),
-    };
-  },
-};
-
-// ── Persona (compatibility) ──
-const Persona = {
-  energy: 0.7, mood: 0.7, curiosity: 3, care: 3, sharing: 3, memory: 3,
-  openness: 0.5, emotionalResonance: 0.5,
-  reset() { Object.assign(this, { energy: 0.7, mood: 0.7, curiosity: 3, care: 3, sharing: 3, memory: 3, openness: 0.5, emotionalResonance: 0.5 }); },
-  motivation() { return this.curiosity + this.care + this.sharing + this.memory; },
-  isReceptive() { return this.energy > 0.4 && this.mood > 0.3; },
-  status() { return { energy: this.energy.toFixed(2), mood: this.mood.toFixed(2), motivation: this.motivation(), openness: this.openness.toFixed(2), resonance: this.emotionalResonance.toFixed(2) }; },
-};
-
-function followUpModeFromStrategy(strategy) {
-  return strategy === 'follow_up_deepen' || strategy === 'follow_up_care' ? 'deepen' : 'light';
-}
-
-function resolvePresentFollowUpPolicy(userMsgSignal, desireLevel) {
-  const signal = userMsgSignal || {};
-  const needCare = parseFloat(signal.needCare || 0) || 0;
-  const intensity = parseFloat(signal.intensity || 0) || 0;
-  const hasQuestion = !!signal.hasQuestion;
-
-  if (needCare > 0.2) {
-    return { mode: 'deepen', strategy: 'follow_up_care', threshold: 0.10, schedulerBias: 1.3 };
-  }
-  if (hasQuestion || intensity > 0.3 || desireLevel >= 0.45) {
-    return { mode: 'deepen', strategy: 'follow_up_deepen', threshold: 0.10, schedulerBias: 1.2 };
-  }
-  return { mode: 'light', strategy: 'follow_up_light', threshold: 0.15, schedulerBias: 1.0 };
-}
-
-function currentPresentFollowUpPolicy() {
-  return resolvePresentFollowUpPolicy(LifeEngine.lastUserMsgSignal, EmotionState.desireLevel);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TRIGGER DECISION CLIENT
-// ═══════════════════════════════════════════════════════════════
-const DecisionClient = {
-  async decide(messages, lifeEvent, emotionEvent) {
-    const interactionMode = LifeEngine.interactionMode;
-    const desireLevel = EmotionState.desireLevel;
-    const desireThreshold = 0.5;
-    const presentPolicy = interactionMode === 'PRESENT'
-      ? resolvePresentFollowUpPolicy(
-          (lifeEvent && lifeEvent.userMsgSignal) || LifeEngine.lastUserMsgSignal,
-          desireLevel,
-        )
-      : null;
-
-    // Determine strategy based on mode
-    let strategy = 'reduce_frequency';
-    let followUpMode = 'light';
-    if (interactionMode === 'PRESENT') {
-      followUpMode = presentPolicy.mode;
-      if (desireLevel < presentPolicy.threshold) {
-        return TriggerDecision.noAction('present_below_threshold', followUpMode);
-      }
-      strategy = presentPolicy.strategy;
-    } else {
-      // ABSENT: check-in style — user may or may not reply
-      const noReply = LifeEngine.consecutiveNoReply;
-      const emotionUrgency = emotionEvent ? emotionEvent.urgency : 0;
-      const userNeedCare = lifeEvent && lifeEvent.userMsgSignal ? lifeEvent.userMsgSignal.needCare : 0;
-
-      if (emotionUrgency > 0.5 || userNeedCare > 0.5) {
-        strategy = 'check_in';
-      } else if (noReply > 3 && desireLevel > 0.7) {
-        strategy = 'keep_company';
-      } else if (noReply > 2) {
-        strategy = 'reduce_frequency';
-      }
-    }
-
-    if (interactionMode === 'PRESENT') {
-      if (!lifeEvent && !emotionEvent && desireLevel < presentPolicy.threshold) {
-        return TriggerDecision.noAction(strategy, followUpMode);
-      }
-    } else if (!lifeEvent && !emotionEvent && desireLevel < desireThreshold) {
-      return TriggerDecision.noAction(strategy, followUpMode);
-    }
-
-    const ctx = {
-      interactionMode,
-      strategy,
-      desireLevel: desireLevel.toFixed(2),
-      consecutiveNoReply: LifeEngine.consecutiveNoReply,
-      recentConversation: messages.slice(-8).map(m => ({ role: m.role, content: m.content.slice(0, 200) })),
-      lifeEvent: lifeEvent ? { reason: lifeEvent.reason, idleMinutes: lifeEvent.idleMinutes, contextHint: lifeEvent.contextHint } : null,
-      emotionEvent: emotionEvent ? { reason: emotionEvent.reason, urgency: emotionEvent.urgency, valence: emotionEvent.snapshot.valence, arousal: emotionEvent.snapshot.arousal } : null,
-    };
-
-    try {
-      const apiKey = document.getElementById('api-key').value.trim();
-      const nowMs = Date.now();
-      const payload = {
-        user_id: 'web-default',
-        interaction_mode: interactionMode,
-        desire_level: parseFloat(desireLevel),
-        consecutive_no_reply: LifeEngine.consecutiveNoReply,
-        test_mode: !!testMode,
-        now_ts_ms: nowMs,
-        last_proactive_sent_ms: LifeEngine.lastProactiveSent,
-        messages: messages.slice(-8).map(m => ({ role: m.role, content: m.content })),
-        life_event: lifeEvent ? {
-          reason: lifeEvent.reason,
-          idle_minutes: lifeEvent.idleMinutes,
-          context_hint: lifeEvent.contextHint,
-          user_msg_signal: lifeEvent.userMsgSignal || null,
-        } : null,
-        emotion_event: emotionEvent ? {
-          reason: emotionEvent.reason,
-          urgency: emotionEvent.urgency,
-          valence: emotionEvent.snapshot.valence,
-          arousal: emotionEvent.snapshot.arousal,
-        } : null,
-      };
-
-      const resp = await fetch('/core/proactive/decision', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': apiKey ? ('Bearer ' + apiKey) : '',
-        },
-        body: JSON.stringify(payload),
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
-      const j = await resp.json();
-      log('decision', `core → shouldSpeak=${j.should_speak} strategy=${j.strategy} conf=${j.confidence}`);
-      const finalStrategy = j.strategy || strategy;
-      return new TriggerDecision(
-        !!j.should_speak,
-        j.topic_hint || null,
-        parseFloat(j.confidence) || 0,
-        finalStrategy,
-        followUpModeFromStrategy(finalStrategy),
-      );
-    } catch (e) {
-      log('error', `Core decision failed, fallback local: ${e.message}`);
-      const nowMs = Date.now();
-      const testDue = testMode && (nowMs - LifeEngine.lastProactiveSent >= TEST_PROACTIVE_INTERVAL_MS);
-      if (testDue) return new TriggerDecision(true, '测试模式问候', 1.0, 'test_interval_1m', 'light');
-      return lifeEvent || emotionEvent
-        ? new TriggerDecision(true, null, 0.3, strategy, followUpModeFromStrategy(strategy))
-        : TriggerDecision.noAction(strategy, followUpMode);
-    }
-  },
-
-  async generateMessage(decision, messages) {
-    const mode = LifeEngine.interactionMode;
-    const topicHint = decision.topicHint;
-    const followUpMode = decision.followUpMode || 'light';
-    let sys;
-    if (mode === 'PRESENT') {
-      if (followUpMode === 'deepen') {
-        sys = `你正在和用户进行实时对话。用户就在旁边，你们在聊天。你需要主动承接话题，并顺着用户刚才的话往下推进半步。
-语气要求：
-- 像是在面对面聊天一样自然，承接刚才的话题
-- 可以用"对了"、"说起来"、"你刚才说..."这类自然的承接词
-- 重点是深挖一个具体点：追一个细节、接一个情绪、或顺着他的问题往下问一句
-- 只推进半步，不要突然转新话题，也不要连发多个问题
-- 最多问一个具体问题，避免泛泛而谈
-- 保持简短（1-3句话）` + memoryContext();
-      } else {
-        sys = `你正在和用户进行实时对话。用户就在旁边，你们在聊天。你需要主动承接话题或发起自然延续。
-语气要求：
-- 像是在面对面聊天一样自然，承接刚才的话题
-- 可以用"对了"、"说起来"、"你刚才说..."这类自然的承接词
-- 轻轻接一句就够了，不要每次都深挖，也不要把一句话聊成盘问
-- 可以分享一个很短的联想，或者补一个轻微追问，但不要施加压力
-- 保持简短（1-2句话）` + memoryContext();
-      }
-    } else {
-      sys = `用户在不在场状态，可能回也可能不回你的消息。你需要主动关心或陪伴。
-语气要求：
-- 温暖、自然、不催促，像给朋友留言
-- 不要假装知道用户当下的状态（你不在场）
-- 可以分享你想到的事、关心用户近况、或者给一个温暖的问候
-- 不要用"我注意到"、"根据分析"这类机械的表达
-- 保持简短（2-4句话）` + memoryContext();
-    }
-    let ctx = '最近的对话：\n';
-    for (const m of messages.slice(-8)) ctx += `${m.role==='user'?'用户':'AI'}: ${m.content}\n`;
-    if (mode === 'PRESENT') ctx += `\nfollow-up 模式：${followUpMode}\n`;
-    if (topicHint) ctx += `\n建议话题：${topicHint}\n`;
-    ctx += '\n请生成一条主动发起的消息：';
-    return await DS.complete([
-      { role: 'system', content: sys },
-      { role: 'user', content: ctx },
-    ], { maxTokens: 200, reasoning: 'medium', label: 'generate-proactive' });
-  },
-};
-
-// ═══════════════════════════════════════════════════════════════
-// ORCHESTRATOR
-// ═══════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════
-// ATTENTION SCHEDULER — replaces fixed-interval polling
-// ═══════════════════════════════════════════════════════════════
-const SHORT_WAVE_MS = 25 * 60 * 1000;   // 25 min
-const LONG_WAVE_MS  = 90 * 60 * 1000;   // 90 min
-const MIN_CHECK_MS  = 15 * 1000;         // min 15s between checks
-const MAX_CHECK_MS  = 20 * 60 * 1000;    // max 20min between checks
-const T50_MS        = 2 * 60 * 60 * 1000; // idle time for P=0.5
-const TEST_PROACTIVE_INTERVAL_MS = 60 * 1000; // deterministic 1 minute in test mode
-
-let schedulerId = null;
-let schedulerRunning = false;
-let testMode = false;
-
-/** Attention probability: how likely Companion is "thinking of" the user right now. */
-function attentionProbability(idleMs, mode, emotionUrgency, followUpMode) {
-  if (idleMs <= 0) return 0.01;
-
-  // Sigmoid base: rises with idle time
-  const sigmoid = 1.0 / (1.0 + Math.exp(-(idleMs - T50_MS) / (T50_MS / 4)));
-
-  // Dual-wave fluctuation
-  const shortWave = Math.sin(2 * Math.PI * idleMs / SHORT_WAVE_MS) * 0.08;
-  const longWave  = Math.sin(2 * Math.PI * idleMs / LONG_WAVE_MS) * 0.12;
-
-  // Both modes have natural attention rhythm — PRESENT is for follow-up, ABSENT for check-in
-  let modeFactor = 1.0;
-  if (mode === 'PRESENT' && followUpMode === 'deepen') modeFactor = 1.15;
-
-  // Emotional urgency boosts attention
-  const emotionBoost = 1.0 + (emotionUrgency || 0) * 0.5;
-
-  let p = (sigmoid + shortWave + longWave) * modeFactor * emotionBoost;
-  // Add small random noise (±5%)
-  p += (Math.random() - 0.5) * 0.1;
-  return Math.max(0.01, Math.min(0.95, p));
-}
-
-/** Compute how long to wait before next check, based on current attention. */
-function computeNextDelay(idleMs, mode, emotionUrgency, followUpMode) {
-  const p = attentionProbability(idleMs, mode, emotionUrgency, followUpMode);
-  // High attention → short delay; low attention → long delay
-  // Map P from [0.01, 0.95] to [MAX_CHECK, MIN_CHECK]
-  const logP = Math.log(p + 0.001);
-  const logMin = Math.log(0.01);
-  const logMax = Math.log(0.95);
-  const frac = (logP - logMin) / (logMax - logMin); // 0→low, 1→high
-  let delay = MAX_CHECK_MS - frac * (MAX_CHECK_MS - MIN_CHECK_MS);
-  if (mode === 'PRESENT' && followUpMode === 'deepen') delay *= 0.7;
-
-  // In test mode, compress to 10s-2min range
-  if (testMode) {
-    // Keep frequent checks so the 1-minute deterministic send can fire on time.
-    return 10_000;
-  }
-  return Math.max(MIN_CHECK_MS, Math.min(MAX_CHECK_MS, delay));
-}
-
-function scheduleNextCheck() {
-  if (!schedulerRunning) return;
-  const now = Date.now();
-  const idleMs = now - LifeEngine.lastInteraction;
-  const mode = LifeEngine.interactionMode;
-  const urgency = EmotionEngine.checkForEmotionalSignal()?.urgency || 0;
-  const followUpMode = mode === 'PRESENT' ? currentPresentFollowUpPolicy().mode : 'light';
-  const delay = computeNextDelay(idleMs, mode, urgency, followUpMode);
-  const p = attentionProbability(idleMs, mode, urgency, followUpMode);
-  log('info', `⏱ Next check in ${(delay/1000).toFixed(0)}s (P=${p.toFixed(3)} mode=${mode}/${followUpMode} idle=${(idleMs/60000).toFixed(1)}min)`);
-  schedulerId = setTimeout(onAttentionTick, delay);
-}
-
-function startScheduler() {
-  if (schedulerRunning) return;
-  schedulerRunning = true;
-  log('info', '🧠 AttentionScheduler started');
-  scheduleNextCheck();
-}
-
-function stopScheduler() {
-  schedulerRunning = false;
-  if (schedulerId) { clearTimeout(schedulerId); schedulerId = null; }
-}
-
-async function onAttentionTick() {
-  schedulerId = null;
-  await onTimerTick();
-  scheduleNextCheck(); // schedulerRunning guard inside
-}
-
-function enableTestMode() {
-  LifeEngine.idleThresholdMs = 60_000;
-  LifeEngine.lastProactiveSent = Date.now();
-  testMode = true;
-  if (schedulerRunning) { stopScheduler(); startScheduler(); }
-  log('event', '🧪 TEST MODE: idleThreshold=1min, attention intervals compressed');
-}
-
-function onModeToggle() {
-  const newMode = document.getElementById('mode-toggle').value;
-  const oldMode = LifeEngine.interactionMode;
-  LifeEngine.interactionMode = newMode;
-  if (newMode === 'PRESENT' && oldMode !== 'PRESENT') {
-    EmotionState.entryBurst();
-    log('event', '📡 切换 → PRESENT (强互动) 💥 desire burst');
-  } else {
-    log('event', `📡 切换 → ${newMode}`);
-  }
-}
-
-async function evaluatePostReply(userText, messages) {
-  LifeEngine.onUserMessage(Date.now(), userText);
-  EmotionState.nudgeDesire(LifeEngine.lastUserMsgSignal);
-  await EmotionEngine.analyze(messages);
-  let followUpEvent = null;
-  if (LifeEngine.interactionMode === 'PRESENT' && LifeEngine.lastUserMsgSignal) {
-    followUpEvent = new LifeEngineEvent(
-      'PRESENT_FOLLOW_UP',
-      Math.max(0.45, EmotionState.desireLevel),
-      '用户刚发来消息，适合自然承接或追问一小步',
-      0,
-      { ...LifeEngine.lastUserMsgSignal },
-    );
-  }
-  const outcome = await evaluateAllTriggers(messages, followUpEvent);
-  if (!outcome?.sent) {
-    EmotionState.desireLevel = Math.max(0, EmotionState.desireLevel - 0.12);
-  }
-}
-
-async function onTimerTick() {
-  const hasApiKey = !!document.getElementById('api-key').value.trim();
-  if (!hasApiKey && !testMode) return;
-
-  const now = Date.now();
-  LifeEngine.onTimerTick(now);
-
-  // Accumulate desire based on idle time
-  const idleMin = (now - LifeEngine.lastInteraction) / 60000;
-  const emotionUrgency = EmotionEngine.checkForEmotionalSignal()?.urgency || 0;
-  EmotionState.accumulateDesire(Math.max(0.5, idleMin), emotionUrgency);
-
-  const lifeEvent = LifeEngine.checkForLifeSignal(now);
-  if (lifeEvent) {
-    log('event', `🔔 LifeEvent: ${lifeEvent.reason} mode=${LifeEngine.interactionMode} desire=${EmotionState.desireLevel.toFixed(2)} (idle=${lifeEvent.idleMinutes}min)`);
-    await EmotionEngine.analyze(getMessages());
-    await evaluateAllTriggers(getMessages(), lifeEvent);
-  } else if (testMode) {
-    // Test mode checks every tick; core enforces deterministic 1-minute cadence.
-    await evaluateAllTriggers(getMessages(), null);
-  } else {
-    updateDebug();
-  }
-}
-
-let lastSnapshot = null;
-
-async function evaluateAllTriggers(messages, lifeEventFromTimer) {
-  const now = Date.now();
-  const lifeEvent = lifeEventFromTimer || LifeEngine.checkForLifeSignal(now);
-  const emotionEvent = EmotionEngine.checkForEmotionalSignal();
-  if (emotionEvent) log('event', `💭 EmotionEvent: ${emotionEvent.reason} urgency=${emotionEvent.urgency.toFixed(2)}`);
-
-  const idleMs = now - LifeEngine.lastInteraction;
-  const schedulerFollowUpMode = LifeEngine.interactionMode === 'PRESENT'
-    ? currentPresentFollowUpPolicy().mode
-    : 'light';
-  const attentionP = attentionProbability(idleMs, LifeEngine.interactionMode, emotionEvent?.urgency || 0, schedulerFollowUpMode);
-
-  const decision = await DecisionClient.decide(messages, lifeEvent, emotionEvent);
-  log('decision', `→ ${decision.shouldSpeak?'SPEAK':'SILENT'} mode=${LifeEngine.interactionMode} desire=${EmotionState.desireLevel.toFixed(2)}`);
-
-  let result = null;
-  if (decision.shouldSpeak) {
-    try {
-      let msg;
-      const hasApiKey = !!document.getElementById('api-key').value.trim();
-      if (testMode && !hasApiKey) {
-        msg = '这是测试模式的主动消息：每 1 分钟触发一次。你可以填写 API Key 来改为 LLM 生成内容。';
-      } else {
-        msg = await DecisionClient.generateMessage(decision, messages);
-      }
-      addMessage('assistant', '[主动关心] ' + msg, true);
-      LifeEngine.onProactiveSent(Date.now());
-      EmotionState.satisfyDesire();
-      Persona.mood = Math.min(1, Persona.mood + 0.05);
-      log('event', `✅ Proactive sent (noReply=${LifeEngine.consecutiveNoReply})`);
-      result = { sent: true, msg: msg.slice(0, 80) };
-      await refreshDebugState();
-    } catch (e) {
-      log('error', `Generate failed: ${e.message}`);
-      result = { sent: false, error: e.message };
-    }
-  }
-
-  // Capture snapshot for debug panel
-  lastSnapshot = {
-    time: fmtTime(now),
-    mode: LifeEngine.interactionMode,
-    desire: EmotionState.desireLevel.toFixed(2),
-    attentionP: (attentionP * 100).toFixed(1),
-    lifeReason: lifeEvent ? lifeEvent.reason : '--',
-    idleMin: lifeEvent ? lifeEvent.idleMinutes : Math.floor(idleMs / 60000),
-    emotionReason: emotionEvent ? emotionEvent.reason : '--',
-    emotionUrgency: emotionEvent ? emotionEvent.urgency.toFixed(2) : '--',
-    userNeedCare: lifeEvent?.userMsgSignal?.needCare?.toFixed(2) || '--',
-    strategy: decision.strategy || 'reduce_frequency',
-    followUpMode: decision.followUpMode || 'light',
-    shouldSpeak: decision.shouldSpeak,
-    topicHint: decision.topicHint || '--',
-    confidence: decision.confidence.toFixed(2),
-    result,
-  };
-
-  updateDebug();
-  return result;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// PERSISTENCE
-// ═══════════════════════════════════════════════════════════════
-let chatMessages = [];
-let currentContact = 'default';
+// ── constants ──
 const CORE_USER_ID = 'web-default';
-let debugState = { memory_views: {}, chat_debug: {}, proactive_debug: {} };
-let lastProactiveDsRequest = null;
+let currentContact = 'default';
+let runtimeMode = 'normal'; // 'normal' | 'live'
 
-function coreHeaders() {
-  const apiKey = document.getElementById('api-key').value.trim();
-  const headers = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
-  return headers;
-}
-
-function buildChatSystemPrompt() {
-  const mode = LifeEngine.interactionMode; // PRESENT | ABSENT
-  const base =
-    `你是 Companion，一个有温度、有思想的私人陪伴者。不是客服，也不是助手，就是陪着用户的那个人。
-
-性格基调：真诚、直接、有好奇心。记得用户说过的细节，偶尔有自己的观点，不总迎合。
-
-回复规则：
-- 长度跟着话题走：闲聊 1-2 句，有内容的话题 2-4 句，情感话题可稍长但不啰嗦
-- 开头不用「当然！」「好的！」「我理解你的感受」等机械套话
-- 句式多变，不总以「我」开头；允许「嗯」「哦」「其实」「话说」等口语词
-- 不每轮都反问；要问就精准问一个，不问「你有什么想法呢」这类泛泛的
-- 情绪感知：用户在倾诉时先接住感受再说话，用户在闲聊时跟着节奏聊
-- 不提及自己是 AI、记忆机制、系统提示等任何内部细节`;
-  if (mode === 'PRESENT') {
-    return base + '\n\n当前状态：用户正在积极交流。保持即时对话节奏，像朋友一样自然往来。';
-  } else {
-    return base + '\n\n当前状态：用户处于低频互动状态。语气可以更温和，像一条随时都能回的留言。';
-  }
-}
-
-function renderMessages() {
-  const container = document.getElementById('messages');
-  container.innerHTML = '';
-  for (const m of chatMessages) {
-    const div = document.createElement('div');
-    div.className = 'msg ' + (m.isProactive ? 'proactive' : m.role);
-    div.innerHTML = `<div class="bubble">${escapeHtml(m.content)}<div class="meta">${fmtTime(m.timestamp || Date.now())}</div></div>`;
-    container.appendChild(div);
-  }
-  container.scrollTop = container.scrollHeight;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// COMPANION MEMORY — journal-style structured memory
-// ═══════════════════════════════════════════════════════════════
+// ── state ──
+let chatMessages = [];
 let userMemory = {
-  summary: '',       // 整体画像：用户是什么样的人，近况如何
-  timeline: [],      // [{date: "07-08", topic: "聊了工作压力", notes: "..."}]
-  facts: [],         // ["在互联网公司做设计", "养了一只猫叫咪咪"]
-  patterns: '',      // 观察到的模式和规律
+  summary: '',
+  timeline: [],
+  facts: [],
+  patterns: '',
   updated: 0,
 };
+let debugState = {};
+let lastProactiveDsRequest = null;
+let lastSnapshot = null;
+let lastActivity = Date.now();
+let lastHistoryCount = null;
 
-async function syncConversationFromCore() {
-  try {
-    const resp = await fetch('/core/chat/history', {
-      method: 'POST',
-      headers: coreHeaders(),
-      body: JSON.stringify({ user_id: CORE_USER_ID, contact_id: currentContact, limit: 500 }),
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
-    const data = await resp.json();
-    chatMessages = (data.messages || []).map(m => ({
-      role: m.role,
-      content: m.content,
-      timestamp: Date.now(),
-      isProactive: typeof m.content === 'string' && m.content.startsWith('[主动关心] '),
-    }));
-    userMemory = Object.assign({summary:'',timeline:[],facts:[],patterns:'',updated:0}, data.memory || {});
-    renderMessages();
-    document.getElementById('memory-display').textContent = memoryDisplayText();
-    await refreshDebugState();
-    log('info', `已同步历史: ${chatMessages.length} 条`);
-  } catch (e) {
-    log('error', `历史同步失败: ${e.message}`);
+// ── helpers ──
+function coreHeaders() {
+  const apiKey = document.getElementById('api-key').value.trim();
+  const h = { 'Content-Type': 'application/json' };
+  if (apiKey) h['Authorization'] = 'Bearer ' + apiKey;
+  return h;
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+
+// ── voice mode ──
+let voiceEnabled = (localStorage.getItem('voiceMode') === '1');
+
+function getVoiceMode() {
+  return voiceEnabled ? '1' : '0';
+}
+
+function saveVoiceMode(val) {
+  voiceEnabled = (val === '1');
+  localStorage.setItem('voiceMode', val);
+  document.getElementById('voice-mode-toggle').value = val;
+}
+
+let _audioEl = null;
+
+function _isProxyPort() {
+  // Detect if we're accessing through the web-shell proxy (port 8080).
+  // Handles both localhost:8080 and GitHub Codespaces URLs like xxx-8080.app.github.dev
+  return location.port === '8080' || /-8080\./.test(location.hostname);
+}
+
+function _playSequence(urls, index) {
+  if (index >= urls.length) return;
+  const url = urls[index];
+  if (!url) { _playSequence(urls, index + 1); return; }
+  // Build URL with proxy prefix if needed
+  let fullUrl = url;
+  if (!url.startsWith('http')) {
+    if (_isProxyPort() && url.startsWith('/chat/audio/')) fullUrl = '/core' + url;
+    fullUrl = location.origin + fullUrl;
   }
+  if (_audioEl) { _audioEl.pause(); _audioEl = null; }
+  const el = new Audio(fullUrl);
+  _audioEl = el;
+  el.onended = () => { _playSequence(urls, index + 1); };
+  el.onerror = () => { log('error', `语音加载失败: ${fullUrl}`); _playSequence(urls, index + 1); };
+  el.play().catch((err) => { log('error', `播放被阻止: ${err.message}`); _playSequence(urls, index + 1); });
+}
+
+function playAudio(url) {
+  if (!url) return;
+  // Build absolute URL
+  let fullUrl = url;
+  if (!url.startsWith('http')) {
+    // If accessing through the web-shell proxy, prepend /core prefix
+    if (_isProxyPort() && url.startsWith('/chat/audio/')) {
+      fullUrl = '/core' + url;
+    }
+    fullUrl = location.origin + fullUrl;
+  }
+  log('info', `🔊 播放语音: ${fullUrl}`);
+  // Stop any currently playing audio
+  if (_audioEl) {
+    _audioEl.pause();
+    _audioEl = null;
+  }
+  const el = new Audio(fullUrl);
+  el.preload = 'auto';
+  _audioEl = el;
+  el.oncanplaythrough = () => { log('info', '🔊 音频已加载就绪'); };
+  el.onended = () => { _audioEl = null; log('info', '🔊 语音播放完毕'); };
+  el.onerror = () => { _audioEl = null; log('error', `语音加载失败: ${fullUrl}`); };
+  el.play().then(() => {
+    log('info', '🔊 开始播放');
+  }).catch((err) => {
+    log('error', `语音播放被阻止: ${err.message}`);
+  });
+}
+
+function log(cat, msg) {
+  const el = document.getElementById('log-area');
+  const d = document.createElement('div');
+  d.className = 'log ' + cat;
+  d.textContent = `[${fmtTime(Date.now())}] ${msg}`;
+  el.appendChild(d);
+  el.scrollTop = el.scrollHeight;
 }
 
 function jsonPretty(v) {
   try { return JSON.stringify(v, null, 2); }
   catch (_) { return String(v); }
+}
+
+function memoryDisplayText() {
+  const lines = [];
+  if (userMemory.summary) lines.push(userMemory.summary);
+  if (userMemory.facts && userMemory.facts.length) lines.push('--- 关键信息 ---\n' + userMemory.facts.map(f => '• ' + f).join('\n'));
+  if (userMemory.timeline && userMemory.timeline.length) lines.push('--- 时间线 ---\n' + userMemory.timeline.map(t => `${t.date} ${t.topic}`).join('\n'));
+  if (userMemory.patterns) lines.push('--- 模式 ---\n' + userMemory.patterns);
+  return lines.length ? lines.join('\n\n') : '(暂无记忆)';
 }
 
 function renderMemoryViews() {
@@ -1027,37 +299,23 @@ async function refreshDebugState() {
     renderMemoryViews();
     renderPromptDisplay();
     renderProactiveDsDisplay();
+    renderEnginesSnapshot();
+    // Normal mode: proactive messages from the core scheduler arrive via history
+    if (runtimeMode !== 'live' && typeof debugState.history_count === 'number') {
+      if (lastHistoryCount !== null && debugState.history_count !== lastHistoryCount) {
+        lastHistoryCount = debugState.history_count;
+        log('event', '📨 检测到新消息（可能为主动发言），已同步');
+        await syncConversationFromCore();
+        return;
+      }
+      lastHistoryCount = debugState.history_count;
+    }
   } catch (e) {
     log('error', `刷新调试状态失败: ${e.message}`);
   }
 }
 
-function memoryContext() {
-  const parts = [];
-  if (userMemory.summary) parts.push(userMemory.summary);
-  if (userMemory.facts.length) parts.push('已知: ' + userMemory.facts.join('；'));
-  if (userMemory.patterns) parts.push(userMemory.patterns);
-  if (userMemory.timeline.length) {
-    const recent = userMemory.timeline.slice(-5).map(t => `${t.date}: ${t.topic}`).join('; ');
-    parts.push('近况: ' + recent);
-  }
-  return parts.length ? `\n关于用户（融入对话，勿逐条复述）：\n${parts.join('\n')}` : '';
-}
-
-function memoryDisplayText() {
-  const lines = [];
-  if (userMemory.summary) lines.push(userMemory.summary);
-  if (userMemory.facts.length) lines.push('--- 关键信息 ---\n' + userMemory.facts.map(f => '• ' + f).join('\n'));
-  if (userMemory.timeline.length) lines.push('--- 时间线 ---\n' + userMemory.timeline.map(t => `${t.date} ${t.topic}`).join('\n'));
-  if (userMemory.patterns) lines.push('--- 模式 ---\n' + userMemory.patterns);
-  return lines.length ? lines.join('\n\n') : '(暂无记忆)';
-}
-
-// ═══════════════════════════════════════════════════════════════
-// UI
-// ═══════════════════════════════════════════════════════════════
-
-function getMessages() { return chatMessages; }
+// ── message rendering ──
 
 function addMessage(role, content, isProactive) {
   const m = { role, content, timestamp: Date.now(), isProactive: !!isProactive };
@@ -1069,38 +327,372 @@ function addMessage(role, content, isProactive) {
   document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+// ── streaming bubbles ──
+const _streamBubbles = {};  // reply_id → { div, content }
+
+function _ensureStreamBubble(replyId, role) {
+  if (_streamBubbles[replyId]) return _streamBubbles[replyId];
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.id = 'bubble-' + replyId;
+  div.appendChild(bubble);
+  document.getElementById('messages').appendChild(div);
+  const entry = { div, content: '' };
+  _streamBubbles[replyId] = entry;
+  return entry;
 }
 
-async function addAssistantReplySegments(data) {
-  const segments = Array.isArray(data?.reply_segments)
-    ? data.reply_segments.map(s => (s || '').trim()).filter(Boolean)
-    : [];
-
-  if (!segments.length) {
-    addMessage('assistant', data?.reply || '');
-    return;
+function _appendToken(replyId, token) {
+  const entry = _streamBubbles[replyId];
+  if (!entry) return;
+  entry.content += token;
+  const bubble = document.getElementById('bubble-' + replyId);
+  if (bubble) {
+    bubble.innerHTML = escapeHtml(entry.content) + '<span class="cursor">▊</span>';
   }
+  document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+}
 
-  for (let i = 0; i < segments.length; i++) {
-    addMessage('assistant', segments[i]);
-    if (i < segments.length - 1) {
-      await sleep(260);
+function _finalizeBubble(replyId, fullText, segments, audioUrls) {
+  const entry = _streamBubbles[replyId];
+  if (!entry) return;
+  delete _streamBubbles[replyId];
+  const isProactive = entry.div.classList.contains('proactive');
+  const ts = Date.now();
+  const segs = (Array.isArray(segments) && segments.filter(Boolean).length)
+    ? segments.filter(Boolean)
+    : [fullText || entry.content];
+  const audios = Array.isArray(audioUrls) ? audioUrls : [];
+  // Replace the streaming bubble with one persisted bubble per segment
+  entry.div.remove();
+  for (let i = 0; i < segs.length; i++) {
+    chatMessages.push({ role: 'assistant', content: segs[i], timestamp: ts, isProactive, audio_url: audios[i] || null });
+  }
+  renderMessages();
+}
+
+// ── typing indicator ──
+let _typingDiv = null;
+
+function showTypingIndicator(active) {
+  if (active) {
+    if (_typingDiv) return;
+    _typingDiv = document.createElement('div');
+    _typingDiv.className = 'msg typing';
+    _typingDiv.innerHTML = '<div class="bubble">Companion 正在输入...</div>';
+    document.getElementById('messages').appendChild(_typingDiv);
+    document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+  } else {
+    if (_typingDiv) {
+      _typingDiv.remove();
+      _typingDiv = null;
     }
   }
 }
 
+// ── debug panel update (driven by thinking.state pushes) ──
+function updateDebugFromThinking(st) {
+  // st = { desire, attention_p, emotion_state, life_state, mode, idle_min }
+  if (st) {
+    document.getElementById('state-persona').innerHTML =
+      `<h3>❤️ 欲望 (Desire)</h3>欲望=<span class="val">${st.desire || '--'}</span> P(注意)=<span class="val">${st.attention_p || '--'}</span>`;
+    document.getElementById('state-life').innerHTML =
+      `<h3>🌍 LifeEngine (周围世界)</h3>模式=<span class="${st.mode==='PRESENT'?'val':'warn'}">${st.mode||'--'}</span> ` +
+      `状态=<span class="val">${st.life_state||'--'}</span> 空闲=<span class="val">${st.idle_min||'--'}min</span>`;
+    document.getElementById('state-emotion').innerHTML =
+      `<h3>💭 EmotionEngine (感受)</h3>状态=<span class="${st.emotion_state==='DISTRESSED'?'err':st.emotion_state==='HEIGHTENED'?'warn':'val'}">${st.emotion_state||'--'}</span>`;
+  }
+}
+
+function updateDebugFromDecision(d) {
+  if (d) {
+    const outcome = d.should_speak
+      ? '<span class="val">✅ should_speak=true</span>'
+      : '<span class="dim">⏭ should_speak=false</span>';
+    document.getElementById('state-decision').innerHTML =
+      `<h3>📋 决策快照</h3>策略=<span class="val">${d.strategy||'--'}</span> ` +
+      `shouldSpeak=${d.should_speak?'<span class="val">true</span>':'<span class="dim">false</span>'} ` +
+      `conf=<span class="dim">${d.confidence||'--'}</span><br>` +
+      `hint=<span class="dim">${d.topic_hint||'--'}</span> ` +
+      `factors=<span class="dim">${jsonPretty(d.factors||{})}</span>`;
+  }
+}
+
+// ── engine snapshot rendering (works in both normal and live mode) ──
+function renderEnginesSnapshot() {
+  const eng = debugState.engines || {};
+  const life = eng.life || {};
+  const emo = eng.emotion || {};
+  const des = eng.desire || {};
+  const per = eng.persona || {};
+  const dec = eng.last_decision || null;
+
+  if (dec) {
+    updateDebugFromDecision(dec);
+  } else {
+    document.getElementById('state-decision').innerHTML =
+      `<h3>📋 决策快照</h3><span class="dim">(暂无决策${runtimeMode === 'live' ? '' : ' — 普通模式不评估主动发言'})</span>`;
+  }
+
+  document.getElementById('state-life').innerHTML =
+    `<h3>🌍 LifeEngine (周围环境)</h3>模式=<span class="${eng.mode === 'PRESENT' ? 'val' : 'warn'}">${eng.mode || '--'}</span> ` +
+    `状态=<span class="val">${life.state || '--'}</span> 空闲=<span class="val">${life.idleMin ?? '--'}min</span><br>` +
+    `阈值=<span class="dim">${life.thresholdMin ?? '--'}min</span> 互动=<span class="dim">${life.interactions ?? '--'}</span> ` +
+    `未回=<span class="dim">${life.noReply ?? '--'}</span>`;
+
+  const emoState = emo.state || '--';
+  document.getElementById('state-emotion').innerHTML =
+    `<h3>💭 EmotionEngine (情绪)</h3>状态=<span class="${emoState === 'DISTRESSED' ? 'err' : emoState === 'HEIGHTENED' ? 'warn' : 'val'}">${emoState}</span> ` +
+    `V=<span class="val">${emo.valence || '--'}</span> A=<span class="val">${emo.arousal || '--'}</span><br>` +
+    `基线V=<span class="dim">${emo.baselineVal || '--'}</span> 脱轨=<span class="dim">${emo.derailment ?? '--'}</span> ` +
+    `负权重=<span class="dim">${emo.negWeight || '--'}</span>`;
+
+  document.getElementById('state-persona').innerHTML =
+    `<h3>❤️ 欲望 (Desire)</h3>欲望=<span class="val">${des.desire || '--'}</span> 门槛=<span class="val">${eng.threshold || '--'}</span> P(注意)=<span class="val">${eng.attention_p || '--'}</span><br>` +
+    `速率=<span class="dim">${des.rate || '--'}</span> 倍率=<span class="dim">${des.multiplier || '--'}</span> ` +
+    `follow-up=<span class="${eng.follow_up_mode === 'deepen' ? 'val' : 'dim'}">${eng.follow_up_mode || '--'}</span>`;
+
+  // Engagement section
+  const engInfo = eng.engagement || {};
+  document.getElementById('state-engagement').innerHTML =
+    `<h3>🎚 互动偏好 (Engagement)</h3>状态=<span class="${engInfo.level==='eager'?'val':engInfo.level==='quiet'?'warn':'dim'}">${engInfo.level || '--'}</span> ` +
+    `倍率=<span class="val">${engInfo.multiplier || '--'}</span> ` +
+    `速率=<span class="dim">${engInfo.base_rate || '--'}</span>`;
+
+  document.getElementById('state-scheduler').innerHTML =
+    `<h3>🎭 Persona (人格特质)</h3>能量=<span class="val">${per.energy || '--'}</span> 心情=<span class="val">${per.mood || '--'}</span> ` +
+    `动机=<span class="val">${per.motivation ?? '--'}</span> 接纳=<span class="${per.receptive ? 'val' : 'warn'}">${per.receptive ? '是' : '否'}</span>`;
+}
+
+// ── history sync (still uses REST) ──
+async function syncConversationFromCore() {
+  try {
+    const resp = await fetch('/core/chat/history', {
+      method: 'POST',
+      headers: coreHeaders(),
+      body: JSON.stringify({ user_id: CORE_USER_ID, contact_id: currentContact, limit: 500 }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    const data = await resp.json();
+    // Flatten persisted segments into per-bubble messages
+    chatMessages = [];
+    for (const m of (data.messages || [])) {
+      const isPro = !!m.is_proactive;
+      const segs = (m.role === 'assistant' && Array.isArray(m.segments) && m.segments.length)
+        ? m.segments
+        : [m.content];
+      const audios = Array.isArray(m.audio_urls) ? m.audio_urls : [];
+      for (let i = 0; i < segs.length; i++) {
+        chatMessages.push({ role: m.role, content: segs[i], timestamp: Date.now(), isProactive: isPro, audio_url: audios[i] || null });
+      }
+    }
+    userMemory = Object.assign({summary:'',timeline:[],facts:[],patterns:'',updated:0}, data.memory || {});
+    renderMessages();
+    document.getElementById('memory-display').textContent = memoryDisplayText();
+    await refreshDebugState();
+    log('info', `已同步历史: ${chatMessages.length} 条`);
+  } catch (e) {
+    log('error', `历史同步失败: ${e.message}`);
+  }
+}
+
+function renderMessages() {
+  const container = document.getElementById('messages');
+  container.innerHTML = '';
+  for (const m of chatMessages) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + (m.isProactive ? 'proactive' : m.role);
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = m.content;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = fmtTime(m.timestamp);
+    if (m.audio_url) {
+      const btn = document.createElement('button');
+      btn.textContent = '🔊';
+      btn.title = '播放语音';
+      btn.style.cssText = 'background:none;border:none;cursor:pointer;font-size:12px;margin-left:4px';
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        playAudio(m.audio_url);
+      });
+      meta.appendChild(btn);
+    }
+    bubble.appendChild(meta);
+    div.appendChild(bubble);
+    container.appendChild(div);
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LIVE MODE — WebSocket Connection
+// ═══════════════════════════════════════════════════════════════
+
+const LIVE = {
+  ws: null,
+  connected: false,
+  replyId: null,
+  typingTimer: null,
+
+  connect() {
+    const apiKey = document.getElementById('api-key').value.trim();
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = location.host;  // same host:port as the page (port 8000 via FastAPI static mount)
+    const url = `${protocol}//${host}/live/${CORE_USER_ID}?contact_id=${encodeURIComponent(currentContact)}&api_key=${encodeURIComponent(apiKey)}&voice_mode=${getVoiceMode()}`;
+
+    log('info', `🔌 连接 Live: ${url}`);
+    this.ws = new WebSocket(url);
+
+    this.ws.onopen = () => {
+      log('info', '✅ WebSocket 已连接');
+    };
+
+    this.ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        this._onMessage(msg);
+      } catch (err) {
+        log('error', `WS 消息解析失败: ${err.message}`);
+      }
+    };
+
+    this.ws.onclose = (e) => {
+      this.connected = false;
+      log('info', `🔌 WebSocket 断开 (code=${e.code}) — 5秒后重连`);
+      showTypingIndicator(false);
+      setTimeout(() => { if (!this.connected) this.connect(); }, 5000);
+    };
+
+    this.ws.onerror = (e) => {
+      log('error', 'WebSocket 错误');
+    };
+  },
+
+  _onMessage(msg) {
+    switch (msg.type) {
+      case 'live.connected':
+        this.connected = true;
+        log('info', `✅ Live session: ${msg.session_id}`);
+        break;
+
+      case 'reply.start':
+        this.replyId = msg.reply_id;
+        _ensureStreamBubble(msg.reply_id, msg.mode === 'proactive' ? 'proactive' : 'assistant');
+        break;
+
+      case 'reply.token':
+        _appendToken(msg.reply_id, msg.token);
+        break;
+
+      case 'reply.end':
+        _finalizeBubble(msg.reply_id, msg.full_text, msg.segments, msg.audio_urls);
+        if (msg.memory) {
+          userMemory = Object.assign({summary:'',timeline:[],facts:[],patterns:'',updated:0}, msg.memory);
+          document.getElementById('memory-display').textContent = memoryDisplayText();
+        }
+        this.replyId = null;
+        showTypingIndicator(false);
+        refreshDebugState();
+        break;
+
+      case 'reply.audio':
+        if (msg.audio_url) {
+          playAudio(msg.audio_url);
+        }
+        break;
+
+      case 'proactive.start':
+        this.replyId = msg.reply_id;
+        _ensureStreamBubble(msg.reply_id, 'proactive');
+        log('event', `📨 主动消息: strategy=${msg.strategy} hint=${msg.topic_hint||'--'}`);
+        break;
+
+      case 'proactive.token':
+        _appendToken(msg.reply_id, msg.token);
+        break;
+
+      case 'proactive.end':
+        _finalizeBubble(msg.reply_id, msg.full_text, msg.segments, msg.audio_urls);
+        this.replyId = null;
+        showTypingIndicator(false);
+        refreshDebugState();
+        break;
+
+      case 'companion.typing':
+        showTypingIndicator(msg.active);
+        break;
+
+      case 'thinking.state':
+        updateDebugFromThinking(msg);
+        break;
+
+      case 'thinking.decision':
+        updateDebugFromDecision(msg);
+        if (!msg.should_speak) {
+          log('decision', `⏭ 跳过 — desire=${(msg.factors||{}).desire||'?'} strategy=${msg.strategy||'?'}`);
+        }
+        break;
+
+      case 'thinking.skipped':
+        log('decision', `⏭ 跳过 (${msg.reason||'?'}) — desire=${msg.desire||'?'} strategy=${msg.strategy||'?'}`);
+        break;
+
+      case 'error':
+        log('error', `后端错误: ${msg.code} — ${msg.detail}`);
+        showTypingIndicator(false);
+        break;
+
+      case 'pong':
+        break;  // keepalive
+
+      default:
+        log('info', `未知消息类型: ${msg.type}`);
+    }
+  },
+
+  send(type, payload = {}) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type, ...payload }));
+    }
+  },
+
+  disconnect() {
+    if (this.ws) {
+      this.ws.close(1000, 'user disconnect');
+      this.ws = null;
+    }
+    this.connected = false;
+  },
+};
+
+// ── send message (normal or live) ──
 async function send() {
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
   if (!text) return;
   input.value = '';
-  addMessage('user', text);
+  lastActivity = Date.now();
 
   const apiKey = document.getElementById('api-key').value.trim();
   if (!apiKey) { addMessage('assistant', '⚠️ 请先设置 DeepSeek API Key'); return; }
 
+  addMessage('user', text);
+
+  if (runtimeMode === 'live') {
+    const mode = document.getElementById('mode-toggle').value;
+    LIVE.send('user.message', { text, mode });
+    LIVE.send('user.typing', { active: false });
+  } else {
+    await sendNormal(text, apiKey);
+  }
+}
+
+async function sendNormal(text, apiKey) {
+  showTypingIndicator(true);
   try {
     const resp = await fetch('/core/chat/reply', {
       method: 'POST',
@@ -1109,153 +701,177 @@ async function send() {
         user_id: CORE_USER_ID,
         contact_id: currentContact,
         message: text,
-        system_prompt: buildChatSystemPrompt(),
-        max_tokens: 1024,
         update_memory: true,
+        memory_update_async: true,
+        context_window: 40,
+        voice_mode: voiceEnabled,
       }),
     });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${err}`);
+    }
     const data = await resp.json();
-    await addAssistantReplySegments(data);
+    const reply = data.reply || '';
+    const segments = (Array.isArray(data.reply_segments) && data.reply_segments.length)
+      ? data.reply_segments
+      : [reply];
+    showTypingIndicator(false);
+    for (let i = 0; i < segments.length; i++) {
+      addMessage('assistant', segments[i]);
+      if (i < segments.length - 1) {
+        await new Promise(r => setTimeout(r, 450));  // natural stagger between bubbles
+      }
+    }
     if (data.memory) {
-      userMemory = Object.assign({summary:'',timeline:[],facts:[],patterns:'',updated:0}, data.memory);
+      userMemory = Object.assign({ summary: '', timeline: [], facts: [], patterns: '', updated: 0 }, data.memory);
       document.getElementById('memory-display').textContent = memoryDisplayText();
     }
-    await refreshDebugState();
-  } catch (e) {
-    addMessage('assistant', '❌ 错误: ' + e.message);
-    log('error', `Send failed: ${e.message}`);
-    return;
-  }
+    // Engagement debug
+    if (data.engagement) {
+      const e = data.engagement;
+      log('info', `🎚 互动偏好: direction=${e.direction} multiplier=${e.multiplier||'?'} source=${e.source||'?'}${e.reason?' ('+e.reason+')':''}`);
+    }
 
-  // Post-reply proactive evaluation should not break the main chat UX.
-  try {
-    await evaluatePostReply(text, chatMessages);
-    updateDebug();
+    // Auto-play all segments sequentially
+    const urls = data.audio_urls || (data.audio_url ? [data.audio_url] : []);
+    if (urls.length) {
+      log('info', `📢 收到 ${urls.length} 段语音，顺序播放`);
+      _playSequence(urls, 0);
+    }
+    await refreshDebugState();
+    log('api', `回复完成 (${reply.length} chars)`);
   } catch (e) {
-    log('error', `Post-reply evaluation failed: ${e.message}`);
+    log('error', `普通模式请求失败: ${e.message}`);
+    addMessage('assistant', '⚠️ 请求失败，请查看调试日志');
+  } finally {
+    showTypingIndicator(false);
   }
 }
 
+// ── interaction mode toggle ──
+document.getElementById('mode-toggle').addEventListener('change', async function() {
+  const newMode = this.value;
+  if (runtimeMode === 'live') {
+    LIVE.send('user.mode', { mode: newMode });
+  } else {
+    // Normal mode: tell the core scheduler directly
+    try {
+      await fetch('/core/state/mode', {
+        method: 'POST',
+        headers: coreHeaders(),
+        body: JSON.stringify({ user_id: CORE_USER_ID, contact_id: currentContact, mode: newMode }),
+      });
+    } catch (e) {
+      log('error', `模式切换失败: ${e.message}`);
+    }
+    refreshDebugState();
+  }
+  log('event', `📡 切换 → ${newMode}`);
+});
+
+// ── voice mode toggle ──
+document.getElementById('voice-mode-toggle').value = getVoiceMode();
+document.getElementById('voice-mode-toggle').addEventListener('change', function() {
+  saveVoiceMode(this.value);
+  log('event', `🔊 语音模式 → ${voiceEnabled ? '开启' : '关闭'}`);
+});
+
+// ── runtime mode toggle ──
+document.getElementById('runtime-mode').addEventListener('change', function() {
+  runtimeMode = this.value;
+  updateRuntimeHint();
+  if (runtimeMode === 'live') {
+    LIVE.connect();
+    log('event', '🔌 切换到 Live 模式');
+  } else {
+    LIVE.disconnect();
+    log('event', '⏹ 切换到普通模式');
+  }
+});
+
+function updateRuntimeHint() {
+  const hint = document.getElementById('runtime-hint');
+  if (runtimeMode === 'live') {
+    hint.textContent = 'Live 模式 — WebSocket 直连 port 8000';
+  } else {
+    hint.textContent = '普通模式 — HTTP /core/chat/reply';
+  }
+}
+
+// ── typing indicator (debounced, live only) ──
+const msgInput = document.getElementById('msg-input');
+msgInput.addEventListener('input', () => {
+  if (runtimeMode !== 'live') return;
+  LIVE.send('user.typing', { active: true });
+  clearTimeout(LIVE.typingTimer);
+  LIVE.typingTimer = setTimeout(() => {
+    LIVE.send('user.typing', { active: false });
+  }, 2000);
+});
+
+// ── idle detection (live only) ──
+window.addEventListener('blur', () => {
+  if (runtimeMode !== 'live') return;
+  LIVE.send('user.idle', { idle_ms: Date.now() - lastActivity });
+});
+window.addEventListener('focus', () => {
+  lastActivity = Date.now();
+  if (runtimeMode !== 'live') return;
+  LIVE.send('user.idle', { idle_ms: 0 });
+});
+setInterval(() => {
+  if (runtimeMode === 'live' && LIVE.connected) {
+    LIVE.send('user.idle', { idle_ms: Date.now() - lastActivity });
+  }
+}, 30000);
+
+// ── ping keepalive (live only) ──
+setInterval(() => {
+  if (runtimeMode === 'live' && LIVE.connected) LIVE.send('ping');
+}, 45000);
+
+// ── periodic debug refresh (normal mode: keeps idle/desire/attention moving) ──
+setInterval(() => {
+  if (runtimeMode !== 'live') refreshDebugState();
+}, 15000);
+
+// ── API key ──
 function saveApiKey() {
   const k = document.getElementById('api-key').value.trim();
   localStorage.setItem('ds_api_key', k);
   log('info', 'API Key 已保存');
 }
 
-function updateDebug() {
-  // ── 决策快照 ──
-  const snap = lastSnapshot;
-  if (snap) {
-    const outcome = snap.shouldSpeak
-      ? (snap.result?.sent ? '<span class="val">✅ 已发送</span>' : '<span class="err">❌ 生成失败</span>')
-      : '<span class="dim">⏭ 跳过</span>';
-    document.getElementById('state-decision').innerHTML =
-      `<h3>📋 决策快照 <span class="dim">${snap.time}</span></h3>`
-      + `模式=<span class="val">${snap.mode}</span> 欲望=<span class="val">${snap.desire}</span> P(注意)=<span class="val">${snap.attentionP}%</span><br>`
-      + `LifeEvent=<span class="${snap.lifeReason!=='--'?'val':'dim'}">${snap.lifeReason}</span> (空闲${snap.idleMin}min) `
-      + `Emotion=<span class="${snap.emotionReason!=='--'?'warn':'dim'}">${snap.emotionReason}</span> `
-      + `needCare=<span class="dim">${snap.userNeedCare}</span><br>`
-      + `策略=<span class="dim">${snap.strategy}</span> follow-up=<span class="dim">${snap.followUpMode}</span> `
-      + `LLM: <span class="${snap.shouldSpeak?'val':'dim'}">shouldSpeak=${snap.shouldSpeak}</span> `
-      + `hint=<span class="dim">${snap.topicHint}</span> conf=<span class="dim">${snap.confidence}</span><br>`
-      + `结果: ${outcome}`;
-  }
-  const l = LifeEngine.status();
-  const modeColor = l.mode === 'PRESENT' ? 'val' : 'warn';
-  document.getElementById('state-life').innerHTML =
-    `<h3>🌍 LifeEngine (周围世界)</h3>`
-    + `模式=<span class="${modeColor}">${l.mode}</span> `
-    + `引擎状态=<span class="val">${l.state}</span> `
-    + `空闲=<span class="val">${l.idleMin}min</span> (阈值=${l.thresholdMin}min)<br>`
-    + `互动次数=<span class="dim">${l.interactions}</span> `
-    + `未回复=<span class="${l.noReply>2?'err':'dim'}">${l.noReply}</span> `
-    + (l.lastMsg ? `用户信号=(强度${l.lastMsg.intensity?.toFixed(1)} 关心${l.lastMsg.needCare?.toFixed(1)})` : '');
-
-  const e = EmotionEngine.status();
-  document.getElementById('state-emotion').innerHTML =
-    `<h3>💭 EmotionEngine (感受)</h3>`
-    + `状态=<span class="${e.state==='DISTRESSED'?'err':e.state==='HEIGHTENED'?'warn':'val'}">${e.state}</span> `
-    + `V=<span class="val">${e.valence}</span> A=<span class="val">${e.arousal}</span><br>`
-    + `基线V=<span class="dim">${e.baselineVal}</span> `
-    + `偏离=<span class="dim">${e.derailment}</span>`;
-
-  const d = EmotionState.status();
-  document.getElementById('state-persona').innerHTML =
-    `<h3>❤️ 欲望 (Emotion)</h3>`
-    + `欲望=<span class="val">${d.desire}</span> `
-    + `基础速率=<span class="dim">${d.rate}</span> `
-    + `情感乘数=<span class="${d.multiplier>1.3?'warn':'dim'}">${d.multiplier}</span>`;
-
-  const idleMs = Date.now() - LifeEngine.lastInteraction;
-  const p = attentionProbability(idleMs, LifeEngine.interactionMode, EmotionEngine.checkForEmotionalSignal()?.urgency || 0);
-  document.getElementById('state-scheduler').innerHTML =
-    `<h3>🧠 注意力调度</h3>P(想起)=<span class="val">${(p*100).toFixed(1)}%</span> 空闲=<span class="dim">${(idleMs/60000).toFixed(1)}min</span> 运行=<span class="${schedulerRunning?'val':'err'}">${schedulerRunning}</span>`;
-}
-
-function log(cat, msg) {
-  const el = document.getElementById('log-area');
-  const d = document.createElement('div');
-  d.className = 'log ' + cat;
-  d.textContent = `[${fmtTime(Date.now())}] ${msg}`;
-  el.appendChild(d);
-  el.scrollTop = el.scrollHeight;
-}
-
-function fmtTime(ts) {
-  const d = new Date(ts);
-  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
-}
-
-function escapeHtml(s) {
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
-}
-
-// ── init ──
+// ── contact switch ──
 document.getElementById('contact-select').onchange = async function() {
-  // Switch
-  currentContact = this.value;
+  const newContact = this.value;
+  if (runtimeMode === 'live') LIVE.disconnect();
+  currentContact = newContact;
+  chatMessages = [];
+  lastHistoryCount = null;
+  document.getElementById('messages').innerHTML = '';
+  document.getElementById('memory-display').textContent = '(暂无记忆)';
   await syncConversationFromCore();
-
-  // Reset engines before applying mode-specific config so test timing baseline is correct.
-  LifeEngine.reset();
-  EmotionEngine.reset();
-  EmotionState.reset();
-  Persona.reset();
-
-  // Memory bootstrap will happen on first message send (when API key is available)
-  const isTest = this.value === 'test';
-  if (isTest) {
-    enableTestMode();
-    log('event', '🧪 切换到测试联系人 — 1分钟后将收到主动消息');
-  } else {
-    LifeEngine.idleThresholdMs = 2 * 60 * 60 * 1000;
-    testMode = false;
-    if (schedulerId) { stopScheduler(); startScheduler(); }
-    log('info', '切换到正常模式');
-  }
-  updateDebug();
+  if (runtimeMode === 'live') LIVE.connect();
+  log('info', `切换到联系人: ${newContact}`);
 };
 
-// Restore API key
+// ── init ──
 const savedKey = localStorage.getItem('ds_api_key');
 if (savedKey) document.getElementById('api-key').value = savedKey;
 
-// Load conversation and memory from core server
-syncConversationFromCore();
+runtimeMode = document.getElementById('runtime-mode').value;
+updateRuntimeHint();
 
-// Memory bootstraps on first message (when API key is available)
+syncConversationFromCore().then(() => {
+  if (runtimeMode === 'live') LIVE.connect();
+});
 
-// Start
-startScheduler();
-updateDebug();
-setInterval(updateDebug, 5000);
-setInterval(refreshDebugState, 8000);
 log('info', '🚀 Companion Web Shell ready');
-log('info', '运行: python3 server.py，然后浏览器打开 http://localhost:8080');
-log('info', '切换到 🧪 测试联系人，发一条消息后等待主动消息');
+log('info', '运行: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000');
+log('info', '浏览器打开 http://localhost:8000');
+log('info', `当前运行模式: ${runtimeMode === 'live' ? 'Live' : '普通'} — 可通过顶部下拉切换`);
 </script>
 </body>
 </html>

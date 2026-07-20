@@ -31,6 +31,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+
+        # Proxy /core/* GET requests to the FastAPI backend (e.g. /core/chat/audio/xxx)
+        if path.startswith("/core/"):
+            return self._proxy_get(path)
+
         if path == "/" or path == "":
             return self._serve_index()
         if path == "/favicon.ico":
@@ -46,6 +51,39 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
+    def _proxy_get(self, path: str):
+        """Forward a GET request to the FastAPI backend and stream the response."""
+        target_path = "/" + path[len("/core/"):]
+        target_url = CORE_TARGET + target_path
+        print(f"[Companion] PROXY GET {path} → {target_url}")
+        req = urllib.request.Request(
+            target_url,
+            headers={"Authorization": self.headers.get("Authorization", "")},
+        )
+        timeout_s = 60
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                data = resp.read()
+                self.send_response(resp.status)
+                self.send_header("Content-Type", resp.headers.get("Content-Type", "application/octet-stream"))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+        except urllib.error.HTTPError as e:
+            err = e.read()
+            self.send_response(e.code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(err)
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
+            self.send_response(504)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({"detail": f"proxy timeout: {e}"}).encode("utf-8"))
 
     def do_HEAD(self):
         path = self.path.split("?")[0]

@@ -28,6 +28,15 @@ class ConversationMessage(BaseModel):
     content: str
 
 
+class HistoryMessage(BaseModel):
+    role: str
+    content: str
+    segments: Optional[List[str]] = None
+    is_proactive: bool = False
+    audio_url: Optional[str] = None
+    audio_urls: Optional[List[str]] = None
+
+
 class LifeEvent(BaseModel):
     reason: str
     idle_minutes: Optional[int] = None
@@ -60,19 +69,24 @@ class ProactiveDecisionResponse(BaseModel):
     topic_hint: Optional[str] = None
     confidence: float = 0.0
     strategy: str = "reduce_frequency"
+    follow_up_mode: str = "light"
 
 
 class ProactiveGenerateRequest(BaseModel):
     user_id: str = "default"
     contact_id: str = "default"
     interaction_mode: str = "ABSENT"
+    follow_up_mode: str = "light"
     topic_hint: Optional[str] = None
     messages: List[ConversationMessage] = []
+    voice_mode: bool = False
+    voice: Optional[str] = None
 
 
 class ProactiveGenerateResponse(BaseModel):
     message: str
     message_segments: List[str] = Field(default_factory=list)
+    audio_url: Optional[str] = None
 
 
 class ChatReplyRequest(BaseModel):
@@ -84,6 +98,8 @@ class ChatReplyRequest(BaseModel):
     context_window: Optional[int] = None
     update_memory: bool = True
     memory_update_async: bool = True
+    voice_mode: bool = False
+    voice: Optional[str] = None
 
 
 class ChatHistoryRequest(BaseModel):
@@ -111,9 +127,83 @@ class ChatReplyResponse(BaseModel):
     reply_segments: List[str] = Field(default_factory=list)
     history_count: int
     memory: MemoryProfile
+    audio_url: Optional[str] = None
+    audio_urls: Optional[List[str]] = None
+    engagement: Optional[Dict[str, Any]] = None
 
 
 class ChatHistoryResponse(BaseModel):
     session_id: str
-    messages: List[ConversationMessage]
+    messages: List[HistoryMessage]
     memory: MemoryProfile
+
+
+# ═══════════════════════════════════════════════════════════════
+# Live Mode — WebSocket protocol messages
+# ═══════════════════════════════════════════════════════════════
+
+class LiveEvent(BaseModel):
+    """Incoming event from client via WebSocket."""
+    type: str
+    text: Optional[str] = None
+    mode: Optional[str] = None
+    active: Optional[bool] = None
+    idle_ms: Optional[int] = None
+
+
+class LiveReplyStart(BaseModel):
+    type: str = "reply.start"
+    reply_id: str
+    mode: str  # "chat" | "proactive"
+
+
+class LiveToken(BaseModel):
+    type: str = "reply.token"
+    reply_id: str
+    token: str
+
+
+class LiveReplyEnd(BaseModel):
+    type: str = "reply.end"
+    reply_id: str
+    full_text: str
+    segments: List[str] = Field(default_factory=list)
+    memory: Optional[MemoryProfile] = None
+
+
+class LiveProactiveStart(BaseModel):
+    type: str = "proactive.start"
+    reply_id: str
+    strategy: str
+    topic_hint: Optional[str] = None
+
+
+class LiveThinkingState(BaseModel):
+    type: str = "thinking.state"
+    desire: str
+    attention_p: str
+    emotion_state: str
+    life_state: str
+    mode: str
+    idle_min: str
+    persona_mood: str
+
+
+class LiveThinkingDecision(BaseModel):
+    type: str = "thinking.decision"
+    strategy: str
+    should_speak: bool
+    confidence: float
+    topic_hint: Optional[str] = None
+    factors: dict = Field(default_factory=dict)
+
+
+class LiveCompanionTyping(BaseModel):
+    type: str = "companion.typing"
+    active: bool
+
+
+class LiveError(BaseModel):
+    type: str = "error"
+    code: str
+    detail: str = ""

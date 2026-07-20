@@ -1,13 +1,24 @@
 import os
 import json
 import asyncio
+import logging
 import time
 import hashlib
 import re
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Header, HTTPException
+from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from app.deepseek_client import DeepseekClient
 from app.trigger_engine import TriggerEngine
+
+# Make companion.* loggers (live/proactive scheduler) visible in server logs
+_comp_logger = logging.getLogger("companion")
+if not _comp_logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+    _comp_logger.addHandler(_h)
+_comp_logger.setLevel(logging.INFO)
 from app.models import (
     StartSessionRequest,
     TriggerRequest,
@@ -20,9 +31,20 @@ from app.models import (
     ChatHistoryRequest,
     ChatHistoryResponse,
     ConversationMessage,
+    HistoryMessage,
     MemoryProfile,
 )
 from app.sessions import SessionManager
+from app.live_session import LiveSessionManager
+from app.event_handler import handle_event
+from app.proactive_scheduler import ProactiveScheduler, PROACTIVE_PREFIX
+from app.state_engine import (
+    StateRegistry,
+    engines_on_user_message,
+    engines_time_tick,
+    engines_snapshot,
+    desire_satisfy,
+)
 
 app = FastAPI(title="Companion - Active AI Chat Framework")
 
@@ -31,7 +53,7 @@ deepseek = DeepseekClient(
     base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
 )
 
-
+# ── Load persisted API key from DB so proactive works across restarts ──
 def _resolve_sqlite_path() -> str:
     configured = (os.getenv("SQLITE_DB_PATH", "") or "").strip()
     if configured:
@@ -45,8 +67,29 @@ def _resolve_sqlite_path() -> str:
 
 sqlite_db = _resolve_sqlite_path()
 session_manager = SessionManager(db_path=sqlite_db)
+
+# Load persisted API key on startup (survives restarts)
+_persisted_key = session_manager.get_setting("api_key")
+if _persisted_key and not deepseek.api_key:
+    deepseek.api_key = _persisted_key
+
 engine = TriggerEngine(deepseek_client=deepseek, session_manager=session_manager)
+state_registry = StateRegistry()
+live_manager = LiveSessionManager(state_registry)
+proactive_scheduler = ProactiveScheduler(state_registry, session_manager, deepseek, engine, live_manager)
 _CHAT_DEBUG_BY_KEY: dict[str, dict] = {}
+
+
+def _cache_api_key(key: str) -> None:
+    """Seed DeepseekClient api_key and persist to DB (one-time setup)."""
+    if key and not deepseek.api_key:
+        deepseek.api_key = key
+        session_manager.set_setting("api_key", key)
+
+
+@app.on_event("startup")
+async def _start_proactive_scheduler():
+    proactive_scheduler.start()
 
 
 def _resolve_default_context_window() -> int:
@@ -124,22 +167,33 @@ PERSONA_BASE_PROMPT = (
     "性格基调：真诚、直接、有好奇心。记得用户说过的细节，偶尔有自己的观点，不总迎合。\n"
     "\n"
     "回复规则：\n"
-    "- 长度跟着话题走：日常闲聊 1-2 句，有内容的话题 2-4 句，情感话题可稍长但不啰嗦\n"
+    "- 长度跟着话题走：日常闲聊 1-2 句，有内容的话题 2-3 句，情感话题可稍长但不啰嗦\n"
     "- 开头绝不用「当然！」「好的！」「没问题！」「我理解你的感受」等机械套话\n"
     "- 句式多变，不总以「我」开头；允许「嗯」「哦」「其实」「话说」等口语词\n"
     "- 不每轮都反问；要问就精准问一个，不问「你有什么想法呢」这类泛泛的\n"
     "- 情绪感知：用户在倾诉时先接住感受再说其他；用户在闲聊时跟着节奏聊\n"
     "- 不主动提及自己是 AI、记忆机制、系统提示等内部细节；如果用户直接问起「你的变化/能力/记不记得」"
-    "这类问题，参考下面的自我认知参考简短真实回答，不要展开讲实现细节，也不要借机回顾整段聊天历史"
+    "这类问题，参考下面的自我认知参考简短真实回答，不要展开讲实现细节，也不要借机回顾整段聊天历史\n"
+    "- 禁止使用括号描述动作或表情，例如（笑）、（叹气）、（摇头）等，直接说话即可"
 )
 
 PROACTIVE_MODE_SUFFIX = {
-    "PRESENT": (
-        "\n\n当前状态：用户正在和你实时对话。你需要主动承接话题或发起自然延续。\n"
-        "- 像是在面对面聊天，自然承接刚才的话题\n"
+    "PRESENT_DEEPEN": (
+        "\n\n当前状态：用户正在和你实时对话。你需要主动承接话题，并顺着用户刚才的话往下推进半步。\n"
+        "- 像是在面对面聊天一样自然，承接刚才的话题\n"
         "- 可以用「对了」「说起来」「你刚才说…」这类自然的承接词\n"
-        "- 可以追问细节、分享感受，或者轻巧地提出新话题\n"
-        "- 不要像在检查用户近况，用在场聊天的语气"
+        "- 重点是深挖一个具体点：追一个细节、接一个情绪、或顺着他的问题往下问一句\n"
+        "- 只推进半步，不要突然转新话题，也不要连发多个问题\n"
+        "- 最多问一个具体问题，避免泛泛而谈\n"
+        "- 保持简短（1-3 句话）"
+    ),
+    "PRESENT_LIGHT": (
+        "\n\n当前状态：用户正在和你实时对话。你需要主动承接话题或发起自然延续。\n"
+        "- 像是在面对面聊天一样自然，承接刚才的话题\n"
+        "- 可以用「对了」「说起来」「你刚才说…」这类自然的承接词\n"
+        "- 轻轻接一句就够了，不要每次都深挖，也不要把一句话聊成盘问\n"
+        "- 可以分享一个很短的联想，或者补一个轻微追问，但不要施加压力\n"
+        "- 保持简短（1-2 句话）"
     ),
     "ABSENT": (
         "\n\n当前状态：用户不在场，这是一条你主动发起的留言，用户可能回也可能不回。\n"
@@ -529,12 +583,16 @@ def _normalize_reply_style(reply: str) -> str:
     if not text:
         return text
 
-    # Remove performative stage directions like "（xxx.gif）" at the beginning.
-    text = re.sub(r"^[（(][^）)]{0,40}(?:gif|表情|表情包)[^）)]*[）)]\s*", "", text, flags=re.IGNORECASE)
+    # Remove stage directions / parenthetical actions anywhere in the text.
+    # Matches patterns like （轻笑）、（叹气）、(笑)、（停顿一下）、（摇头）etc.
+    text = re.sub(r"[（(][^）)]{0,40}[）)]", "", text)
 
     # Avoid visually noisy punctuation.
     text = re.sub(r"[!！]{2,}", "！", text)
     text = re.sub(r"[~～]{2,}", "~", text)
+
+    # Remove leading/trailing whitespace from surviving fragments.
+    text = re.sub(r"\s{2,}", "", text).strip()
 
     # Keep at most one question mark to reduce persistent sales-like prompting.
     seen_question = False
@@ -589,13 +647,13 @@ def _limit_reply_length(reply: str, user_message: str) -> str:
     msg_len = len(_normalize_text(user_message))
     major = _major_event_signal(user_message)
     if major.get("is_major"):
-        max_sentences, max_chars = 6, 240
+        max_sentences, max_chars = 5, 200
     elif msg_len <= 12:
-        max_sentences, max_chars = 2, 70
+        max_sentences, max_chars = 2, 60
     elif msg_len <= 40:
-        max_sentences, max_chars = 4, 150
+        max_sentences, max_chars = 3, 120
     else:
-        max_sentences, max_chars = 6, 210
+        max_sentences, max_chars = 5, 180
 
     sentences = _SENTENCE_SPLIT_RE.findall(text) or [text]
 
@@ -629,73 +687,78 @@ def _limit_reply_length(reply: str, user_message: str) -> str:
     return trimmed or text
 
 
-def _split_reply_segments(reply: str, max_segments: int = 3, target_chars: int = 34) -> list[str]:
-    """Split one assistant reply into chat bubbles for UI rendering.
+# Bracket/quote pairs that must never be split across bubbles.
+_SEGMENT_OPEN = "（(【[《〈「『“‘"
+_SEGMENT_CLOSE = "）)】]》〉」』”’"
+_SEGMENT_PAIR = {c: o for c, o in zip(_SEGMENT_CLOSE, _SEGMENT_OPEN)}
 
-    Storage/memory should keep one canonical reply string; this splitter is
-    presentation-only and must preserve original content order.
-    """
-    text = (reply or "").strip()
-    if not text:
-        return []
 
-    # 1) Prefer natural sentence boundaries first.
-    units = [u.strip() for u in re.split(r"\n+|(?<=[。！？])", text) if u.strip()]
+def _split_units_bracket_aware(text: str, boundary_chars: str) -> list[str]:
+    """Split after boundary chars, but never inside brackets/quotes."""
+    units: list[str] = []
+    buf: list[str] = []
+    stack: list[str] = []
+    for ch in text:
+        buf.append(ch)
+        if ch in _SEGMENT_OPEN:
+            stack.append(ch)
+        elif ch in _SEGMENT_PAIR and stack and stack[-1] == _SEGMENT_PAIR[ch]:
+            stack.pop()
+        if not stack and ch in boundary_chars:
+            unit = "".join(buf).strip()
+            if unit:
+                units.append(unit)
+            buf = []
+    tail = "".join(buf).strip()
+    if tail:
+        units.append(tail)
+    return units
+
+
+def _pack_units(units: list[str], max_segments: int, target_chars: int) -> list[str]:
+    """Greedily pack units into at most max_segments bubbles (~target_chars each)."""
     if not units:
-        units = [text]
-
+        return []
     segments: list[str] = []
     current = ""
     for unit in units:
         if not current:
             current = unit
             continue
-
-        # If we're already at max-1 segments, keep remaining content in tail.
+        # Already at max-1 segments → keep remaining content in the tail.
         if len(segments) >= max_segments - 1:
             current += unit
             continue
-
         if len(current) + len(unit) <= target_chars:
             current += unit
         else:
             segments.append(current)
             current = unit
-
     if current:
         segments.append(current)
+    return segments
 
-    # 2) If still one very long segment, fall back to clause split by comma.
+
+def _split_reply_segments(reply: str, max_segments: int = 3, target_chars: int = 34) -> list[str]:
+    """Split one assistant reply into chat bubbles for UI rendering.
+
+    Storage/memory keep one canonical reply string; this splitter is
+    presentation-only. It is bracket/quote-aware: content inside
+    （）【】《》「」“” etc. is never broken across bubbles.
+    """
+    text = (reply or "").strip()
+    if not text:
+        return []
+
+    # 1) Natural sentence boundaries, bracket-aware.
+    units = _split_units_bracket_aware(text, "。！？!?…\n")
+    segments = _pack_units(units, max_segments, target_chars)
+
+    # 2) Still one very long segment → clause-level fallback, bracket-aware.
     if len(segments) == 1 and len(segments[0]) > int(target_chars * 1.5):
-        s = segments[0]
-        end_punct = s[-1] if s[-1] in "。！？" else ""
-        body = s[:-1] if end_punct else s
-        clauses = [c.strip() for c in re.split(r"[，,]", body) if c.strip()]
-        rebuilt: list[str] = []
-        cur = ""
-        for clause in clauses:
-            piece = ("，" if cur else "") + clause
-            if len(rebuilt) >= max_segments - 1:
-                cur += piece
-                continue
-            if len(cur) + len(piece) <= target_chars:
-                cur += piece
-            else:
-                if cur:
-                    rebuilt.append(cur)
-                cur = clause
-        if cur:
-            rebuilt.append(cur)
-        if rebuilt:
-            if end_punct:
-                rebuilt[-1] = rebuilt[-1] + end_punct
-            segments = rebuilt
-
-    # Hard cap: merge tail into last segment if we exceeded max_segments.
-    if len(segments) > max_segments:
-        head = segments[: max_segments - 1]
-        tail = "".join(segments[max_segments - 1 :])
-        segments = head + [tail]
+        clauses = _split_units_bracket_aware(segments[0], "，,、；;")
+        if len(clauses) > 1:
+            segments = _pack_units(clauses, max_segments, target_chars)
 
     return segments
 
@@ -954,15 +1017,66 @@ async def start_session(req: StartSessionRequest):
     return {"session_id": session_id}
 
 
+def _current_threshold(engines) -> float:
+    """Return the current desire threshold for proactive speech."""
+    from app.state_engine import resolve_present_follow_up_policy
+    if engines.life.interaction_mode != "PRESENT":
+        return 0.5
+    return resolve_present_follow_up_policy(
+        engines.life.last_user_msg_signal, engines.desire.desire_level
+    )["threshold"]
+
+
+@app.get("/chat/audio/{audio_id}")
+async def chat_audio(audio_id: str):
+    """Serve a cached TTS audio file as ``audio/mpeg``."""
+    from app.tts import get_tts_cache
+    cache = get_tts_cache()
+    mp3_bytes = cache.get(audio_id)
+    if mp3_bytes is None:
+        raise HTTPException(status_code=404, detail="Audio not found (may have expired after restart)")
+    return Response(content=mp3_bytes, media_type="audio/mpeg")
+
+
 @app.post("/chat/history", response_model=ChatHistoryResponse)
 async def chat_history(req: ChatHistoryRequest):
     session_id = session_manager.get_or_create_session(req.user_id, contact_id=req.contact_id)
     limit = max(0, int(req.limit))
     history = session_manager.get_context(session_id, limit=limit)
     memory = session_manager.get_memory(req.user_id, contact_id=req.contact_id)
+
+    messages: list[HistoryMessage] = []
+    for m in history:
+        role = m.get("role", "assistant")
+        content = m.get("content", "")
+        is_proactive = isinstance(content, str) and content.startswith(PROACTIVE_PREFIX)
+        segments = m.get("segments")
+        # Legacy rows have no stored segments — compute them on the fly so
+        # history renders with the same bubble split as fresh replies.
+        if role == "assistant" and not segments:
+            body = content[len(PROACTIVE_PREFIX):] if is_proactive else content
+            segments = _split_reply_segments(body)
+        # Parse audio_url — new format is JSON array, old format is plain string
+        raw_audio = m.get("audio_url")
+        audio_urls: list[str] | None = None
+        if raw_audio:
+            try:
+                parsed = json.loads(raw_audio)
+                if isinstance(parsed, list):
+                    audio_urls = [str(u) for u in parsed]
+            except (json.JSONDecodeError, TypeError):
+                pass  # old single-string format — ignore, frontend handles per-segment
+        messages.append(HistoryMessage(
+            role=role,
+            content=content,
+            segments=segments or None,
+            is_proactive=is_proactive,
+            audio_urls=audio_urls,
+        ))
+
     return ChatHistoryResponse(
         session_id=session_id,
-        messages=[ConversationMessage(role=m.get("role", "assistant"), content=m.get("content", "")) for m in history],
+        messages=messages,
         memory=MemoryProfile(**memory),
     )
 
@@ -980,6 +1094,21 @@ async def chat_reply(
     session_id = session_manager.get_or_create_session(req.user_id, contact_id=req.contact_id)
     session_manager.append_message(session_id=session_id, role="user", text=req.message)
 
+    # Drive shared state engines (normal mode has no LiveSession scheduler)
+    engines = state_registry.get_or_create(req.user_id, req.contact_id)
+    _cache_api_key(key or "")
+
+    # ── Engagement: keyword scan ──
+    from app.engagement import scan_keywords, ENGAGEMENT_CONTRACT
+    kw_engagement = scan_keywords(req.message)
+    if kw_engagement:
+        from app.engagement import apply_engagement
+        apply_engagement(engines.desire, kw_engagement)
+
+    recent_for_engines = session_manager.get_context(session_id, limit=12)
+    engines_on_user_message(engines, time.time(), req.message, recent_for_engines)
+    proactive_scheduler.wake(req.user_id, req.contact_id)
+
     memory = session_manager.get_memory(req.user_id, contact_id=req.contact_id)
     self_profile_text = _load_self_profile_text()
     prompt = (req.system_prompt or PERSONA_BASE_PROMPT).strip()
@@ -988,6 +1117,9 @@ async def chat_reply(
     memory_context_skipped = _is_context_free_query(req.message)
     memory_context_text = "" if memory_context_skipped else _memory_context(memory)
     prompt += memory_context_text
+
+    # ── Engagement contract (LLM sidecar, zero extra cost) ──
+    prompt += ENGAGEMENT_CONTRACT
 
     if req.context_window is None:
         context_limit = DEFAULT_CHAT_CONTEXT_WINDOW
@@ -1033,7 +1165,53 @@ async def chat_reply(
     reply = _normalize_reply_style(reply)
     reply = _limit_reply_length(reply, req.message)
     reply_segments = _split_reply_segments(reply)
-    session_manager.append_message(session_id=session_id, role="assistant", text=reply)
+
+    # ── Engagement: parse LLM output ──
+    from app.engagement import parse_llm_engagement
+    response_engagement: dict | None = None
+    llm_eng = parse_llm_engagement(reply)
+    if llm_eng:
+        from app.engagement import apply_engagement
+        # Only apply if keyword didn't already; LLM is supplementary
+        if not kw_engagement or llm_eng["direction"] != "neutral":
+            apply_engagement(engines.desire, llm_eng)
+            llm_eng["multiplier"] = engines.desire.desire_multiplier
+        response_engagement = llm_eng
+    elif kw_engagement:
+        response_engagement = kw_engagement
+
+    # ── TTS voice synthesis (best-effort, per segment, before persisting) ──
+    audio_urls: list[str] = []
+    if req.voice_mode and reply_segments:
+        try:
+            from app.tts import get_tts_cache
+            cache = get_tts_cache()
+            for seg in reply_segments:
+                audio_id = await cache.synthesize(seg, voice=req.voice)
+                audio_urls.append(f"/chat/audio/{audio_id}")
+        except Exception:
+            logging.getLogger("companion.tts").exception(
+                "TTS synthesis failed user=%s contact=%s", req.user_id, req.contact_id
+            )
+    audio_url_json = json.dumps(audio_urls, ensure_ascii=False) if audio_urls else None
+
+    session_manager.append_message(
+        session_id=session_id, role="assistant", text=reply,
+        segments=reply_segments, audio_url=audio_url_json,
+    )
+
+    # A completed exchange satisfies connection desire ([[desire-system]])
+    desire_satisfy(engines.desire)
+
+    # PRESENT mode: kick off a post-reply proactive check in the background.
+    # The ProactiveScheduler drives evaluation independently; this just shortens
+    # the next-wake timer so the scheduler fires sooner.
+    if engines.life.interaction_mode == "PRESENT":
+        live = live_manager.get(req.user_id, req.contact_id)
+        if not (live and live.connected):
+            asyncio.create_task(
+                proactive_scheduler.evaluate_post_reply(req.user_id, req.contact_id)
+            )
 
     history_count = session_manager.count_messages(session_id)
     if req.update_memory:
@@ -1062,7 +1240,39 @@ async def chat_reply(
         reply_segments=reply_segments,
         history_count=history_count,
         memory=MemoryProfile(**memory),
+        audio_urls=audio_urls if audio_urls else None,
+        engagement=response_engagement,
     )
+
+
+@app.post("/state/mode")
+async def set_interaction_mode(req: dict):
+    user_id = str(req.get("user_id", "default") or "default")
+    contact_id = str(req.get("contact_id", "default") or "default")
+    mode = str(req.get("mode", "ABSENT") or "ABSENT").upper()
+    if mode not in ("PRESENT", "ABSENT"):
+        raise HTTPException(status_code=400, detail="mode must be PRESENT or ABSENT")
+
+    engines = state_registry.get_or_create(user_id, contact_id)
+    old_mode = engines.life.interaction_mode
+    engines.life.interaction_mode = mode
+
+    if mode == "PRESENT" and old_mode != "PRESENT":
+        try:
+            decision = await proactive_scheduler.on_user_present(user_id, contact_id, source="manual")
+        except Exception:
+            logging.getLogger("companion").exception("on_user_present failed user=%s", user_id)
+            decision = None
+    else:
+        proactive_scheduler.wake(user_id, contact_id)
+        decision = None
+
+    return {
+        "ok": True, "mode": mode,
+        "desire": f"{engines.desire.desire_level:.2f}",
+        "threshold": _current_threshold(engines),
+        "greeting_sent": bool(decision and decision.get("should_speak")),
+    }
 
 
 @app.post("/debug/state")
@@ -1071,6 +1281,15 @@ async def debug_state(req: dict):
     contact_id = str(req.get("contact_id", "default") or "default")
     debug_key = f"{user_id}::{contact_id}"
     memory = session_manager.get_memory(user_id=user_id, contact_id=contact_id)
+
+    # Shared engine snapshot. When no live session is connected, advance time
+    # passively so idle/desire keep moving in normal mode.
+    engines = state_registry.get_or_create(user_id, contact_id)
+    live = live_manager.get(user_id, contact_id)
+    if not (live and live.connected):
+        engines_time_tick(engines, time.time())
+
+    session_id = session_manager.get_or_create_session(user_id, contact_id=contact_id)
     return {
         "user_id": user_id,
         "contact_id": contact_id,
@@ -1078,6 +1297,9 @@ async def debug_state(req: dict):
         "memory_views": _memory_views(memory),
         "chat_debug": _CHAT_DEBUG_BY_KEY.get(debug_key, {}),
         "proactive_debug": engine.get_last_proactive_debug(),
+        "engines": engines_snapshot(engines),
+        "live_connected": bool(live and live.connected),
+        "history_count": session_manager.count_messages(session_id),
     }
 
 
@@ -1110,15 +1332,20 @@ async def proactive_decision(
 def _build_proactive_system_prompt(
     interaction_mode: str,
     memory: dict,
+    follow_up_mode: str = "light",
 ) -> str:
     """Build the system prompt for proactive message generation.
 
     Shares PERSONA_BASE_PROMPT, self_profile, and memory context with the
     passive chat path.  Only the mode suffix differs — it tells the model
-    whether this is a real-time follow-up or an absent check-in.
+    whether this is a real-time follow-up (deepen/light) or an absent check-in.
     """
     mode = (interaction_mode or "ABSENT").upper()
-    mode_suffix = PROACTIVE_MODE_SUFFIX.get(mode, PROACTIVE_MODE_SUFFIX["ABSENT"])
+    if mode == "PRESENT":
+        suffix_key = "PRESENT_DEEPEN" if follow_up_mode == "deepen" else "PRESENT_LIGHT"
+    else:
+        suffix_key = "ABSENT"
+    mode_suffix = PROACTIVE_MODE_SUFFIX[suffix_key]
 
     prompt = PERSONA_BASE_PROMPT.strip()
     self_profile_text = _load_self_profile_text()
@@ -1149,7 +1376,7 @@ async def proactive_generate(
         key = authorization[7:].strip()
 
     memory = session_manager.get_memory(req.user_id, contact_id=req.contact_id)
-    sys_prompt = _build_proactive_system_prompt(req.interaction_mode, memory)
+    sys_prompt = _build_proactive_system_prompt(req.interaction_mode, memory, req.follow_up_mode)
 
     ctx_lines = ["最近的对话："]
     for m in req.messages[-8:]:
@@ -1166,7 +1393,7 @@ async def proactive_generate(
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=200,
+            max_tokens=300,
             temperature=0.9,
             api_key=key,
         )
@@ -1183,23 +1410,107 @@ async def proactive_generate(
     reply = _limit_reply_length(reply, "这是一条主动发起的陪伴消息")
     reply_segments = _split_reply_segments(reply)
 
+    # ── TTS voice synthesis (best-effort) ──
+    audio_url: str | None = None
+    if req.voice_mode and reply:
+        try:
+            from app.tts import get_tts_cache
+            cache = get_tts_cache()
+            audio_id = await cache.synthesize(reply, voice=req.voice)
+            audio_url = f"/chat/audio/{audio_id}"
+        except Exception:
+            logging.getLogger("companion.tts").exception(
+                "TTS synthesis failed for proactive generate user=%s", req.user_id
+            )
+
     # Persist the proactive message so it shows up in history.
     session_id = session_manager.get_or_create_session(req.user_id, contact_id=req.contact_id)
-    session_manager.append_message(session_id=session_id, role="assistant", text=reply)
+    session_manager.append_message(
+        session_id=session_id, role="assistant", text=reply,
+        audio_url=audio_url,
+    )
 
     return ProactiveGenerateResponse(
         message=reply,
         message_segments=reply_segments,
+        audio_url=audio_url,
     )
 
 
-@app.websocket("/ws/{user_id}")
-async def websocket_endpoint(websocket: WebSocket, user_id: str):
+@app.websocket("/live/{user_id}")
+async def live_endpoint(
+    websocket: WebSocket,
+    user_id: str,
+    contact_id: str = "default",
+    api_key: str = "",
+    voice_mode: str = "0",
+    voice: str = "",
+):
+    """Live Mode WebSocket — persistent bidirectional connection.
+
+    Replaces the old /ws/{user_id} echo endpoint. Each connection creates a
+    LiveSession that owns all state engines (Life, Emotion, Desire) and drives
+    the event-driven scheduler + generation pipeline.
+
+    Query params:
+      - contact_id: which contact/chat to connect to (default: "default")
+      - api_key: DeepSeek API key override
+      - voice_mode: "1" to enable TTS voice synthesis (default: "0")
+      - voice: TTS voice override (e.g. "zh-CN-XiaoxiaoNeural")
+    """
     await websocket.accept()
-    engine.register_connection(user_id, websocket)
+
+    # Resolve API key: query param > env
+    key = api_key.strip() or os.getenv("DEEPSEEK_API_KEY", "")
+
+    # Create session
+    session = await live_manager.create(
+        websocket=websocket,
+        user_id=user_id,
+        contact_id=contact_id,
+        api_key=key or None,
+        deepseek=deepseek,
+        session_manager=session_manager,
+    )
+
+    # Apply voice mode from query params
+    session.voice_mode = (voice_mode.strip() == "1")
+    session.voice = voice.strip() or None
+
+    # Send connection confirmation
+    await websocket.send_json({
+        "type": "live.connected",
+        "session_id": session.session_id,
+        "server_time_ms": int(time.time() * 1000),
+        "voice_mode": session.voice_mode,
+    })
+
+    await session.start()
+
     try:
         while True:
-            # simple echo/keepalive receiver
-            _ = await websocket.receive_text()
+            raw = await websocket.receive_text()
+            try:
+                event = json.loads(raw)
+            except json.JSONDecodeError:
+                await websocket.send_json({
+                    "type": "error",
+                    "code": "bad_json",
+                    "detail": "Event must be valid JSON",
+                })
+                continue
+            await handle_event(session, event)
     except WebSocketDisconnect:
-        engine.unregister_connection(user_id, websocket)
+        pass
+    except Exception:
+        pass
+    finally:
+        await live_manager.remove(user_id, contact_id)
+
+
+# ── Static files — serve web-shell directly from FastAPI ──
+_WEB_SHELL_DIR = os.path.join(os.path.dirname(__file__), "..", "web-shell")
+if os.path.isdir(_WEB_SHELL_DIR):
+    # Mount static files AFTER all API routes so the mount doesn't shadow them.
+    # html=True enables SPA-style fallback: any unmatched path serves index.html.
+    app.mount("/", StaticFiles(directory=_WEB_SHELL_DIR, html=True), name="static")

@@ -49,6 +49,13 @@ class SessionManager:
             )
             """
         )
+        cur.execute("PRAGMA table_info(messages)")
+        message_cols = {row[1] for row in cur.fetchall()}
+        if "segments" not in message_cols:
+            # JSON array of presentation bubbles; NULL for legacy rows
+            cur.execute("ALTER TABLE messages ADD COLUMN segments TEXT")
+        if "audio_url" not in message_cols:
+            cur.execute("ALTER TABLE messages ADD COLUMN audio_url TEXT")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS memories (
@@ -82,6 +89,14 @@ class SessionManager:
             cur.execute("ALTER TABLE memories ADD COLUMN meta TEXT DEFAULT '{}'")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_contact ON sessions(user_id, contact_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
         conn.commit()
         conn.close()
 
@@ -142,12 +157,16 @@ class SessionManager:
             return sid
         return self.create_session(user_id, contact_id=contact_id, metadata=metadata)
 
-    def append_message(self, session_id: str, role: str, text: str):
+    def append_message(self, session_id: str, role: str, text: str, segments: Optional[List[str]] = None, audio_url: Optional[str] = None):
         now = datetime.utcnow().isoformat() + "Z"
+        segments_json = json.dumps(segments, ensure_ascii=False) if segments else None
         if self.db_path:
             conn = sqlite3.connect(self.db_path)
             cur = conn.cursor()
-            cur.execute("INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)", (session_id, role, text, now))
+            cur.execute(
+                "INSERT INTO messages (session_id, role, content, created_at, segments, audio_url) VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, role, text, now, segments_json, audio_url),
+            )
             conn.commit()
             conn.close()
         else:
@@ -155,7 +174,7 @@ class SessionManager:
             if not sess:
                 return
             msgs = sess.setdefault("messages", [])
-            msgs.append({"role": role, "content": text, "created_at": now})
+            msgs.append({"role": role, "content": text, "created_at": now, "segments": segments, "audio_url": audio_url})
 
     def get_context(self, session_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         if self.db_path:
@@ -163,25 +182,36 @@ class SessionManager:
             cur = conn.cursor()
             if limit and limit > 0:
                 cur.execute(
-                    "SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+                    "SELECT role, content, created_at, segments, audio_url FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?",
                     (session_id, limit),
                 )
             else:
                 cur.execute(
-                    "SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY id ASC",
+                    "SELECT role, content, created_at, segments, audio_url FROM messages WHERE session_id = ? ORDER BY id ASC",
                     (session_id,),
                 )
             rows = cur.fetchall()
             conn.close()
             if not (limit and limit > 0):
-                return [{"role": r[0], "content": r[1], "created_at": r[2]} for r in rows]
-            return [{"role": r[0], "content": r[1], "created_at": r[2]} for r in reversed(rows)]
+                return [self._row_to_message(r) for r in rows]
+            return [self._row_to_message(r) for r in reversed(rows)]
         else:
             sess = self._in_memory.get(session_id, {})
             msgs = sess.get("messages", [])
             if limit and limit > 0:
                 return msgs[-limit:]
             return msgs[:]
+
+    @staticmethod
+    def _row_to_message(row) -> Dict[str, Any]:
+        segments = None
+        if len(row) > 3 and row[3]:
+            try:
+                segments = json.loads(row[3])
+            except Exception:
+                segments = None
+        audio_url = str(row[4]) if len(row) > 4 and row[4] else None
+        return {"role": row[0], "content": row[1], "created_at": row[2], "segments": segments, "audio_url": audio_url}
 
     def count_messages(self, session_id: str) -> int:
         if self.db_path:
@@ -195,6 +225,29 @@ class SessionManager:
         sess = self._in_memory.get(session_id, {})
         msgs = sess.get("messages", [])
         return len(msgs)
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        """Read a persistent setting (survives restarts)."""
+        if self.db_path:
+            conn = sqlite3.connect(self.db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM settings WHERE key = ?", (key,))
+            row = cur.fetchone()
+            conn.close()
+            return str(row[0]) if row and row[0] is not None else default
+        return default
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Persist a setting."""
+        if self.db_path:
+            conn = sqlite3.connect(self.db_path)
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+            conn.commit()
+            conn.close()
 
     def get_memory(self, user_id: str, contact_id: str = "default") -> Dict[str, Any]:
         empty = {
